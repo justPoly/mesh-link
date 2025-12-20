@@ -15,6 +15,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
+/**
+ * Monitors internet connectivity in real-time using ConnectivityManager.NetworkCallback.
+ * Provides Compose-observable State objects for UI updates.
+ */
 class InternetMonitor(context: Context) {
 
     private val connectivityManager =
@@ -24,26 +28,29 @@ class InternetMonitor(context: Context) {
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
+            Log.d("InternetMonitor", "onAvailable: Internet became available")
             updateNetworkStatus(network)
         }
 
         override fun onLost(network: Network) {
-            updateCurrentStatus()
+            Log.d("InternetMonitor", "onLost: Internet connection lost")
+            updateCurrentStatus() // Re-check current state (usually no internet)
         }
 
         override fun onCapabilitiesChanged(
             network: Network,
             capabilities: NetworkCapabilities
         ) {
+            Log.d("InternetMonitor", "onCapabilitiesChanged: Network capabilities updated")
             updateNetworkStatus(network, capabilities)
         }
     }
 
-    // Private mutable states
+    // Private backing mutable states
     private val _isConnected: MutableState<Boolean> = mutableStateOf(false)
     private val _connectionType: MutableState<String> = mutableStateOf("Unknown")
 
-    // Public read-only State for Compose observation with `by` delegation
+    // Public read-only State for safe observation in Compose using `by`
     val isConnected: State<Boolean> = _isConnected
     val connectionType: State<String> = _connectionType
 
@@ -54,52 +61,83 @@ class InternetMonitor(context: Context) {
                 .build()
 
             connectivityManager.registerNetworkCallback(request, networkCallback)
+            Log.d("InternetMonitor", "Network callback registered successfully")
         } catch (e: SecurityException) {
-            Log.e("MeshLink", "Permission denied for network callback: ${e.message}")
+            Log.e("InternetMonitor", "Permission denied: ${e.message}")
         }
 
+        // Initial check on startup
         updateCurrentStatus()
     }
 
+    /**
+     * Checks the current active network and updates state accordingly.
+     * Used on init and when connection is lost.
+     */
     private fun updateCurrentStatus() {
-        try {
-            val network = connectivityManager.activeNetwork
-            updateNetworkStatus(network)
-        } catch (e: SecurityException) {
-            mainScope.launch {
-                _isConnected.value = false
-                _connectionType.value = "Unknown"
+        val activeNetwork = connectivityManager.activeNetwork
+        val capabilities = activeNetwork?.let { connectivityManager.getNetworkCapabilities(it) }
+
+        val hasInternet = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        val type = if (hasInternet) {
+            when {
+                capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "Wi-Fi"
+                capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "Mobile Data"
+                capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> "Ethernet"
+                else -> "Unknown"
             }
+        } else {
+            "None" // Explicitly show no connection
+        }
+
+        mainScope.launch {
+            Log.d("InternetMonitor", "Status Update → Connected: $hasInternet, Type: $type")
+            _isConnected.value = hasInternet
+            _connectionType.value = type
         }
     }
 
+    /**
+     * Updates status when a network becomes available or capabilities change.
+     */
     private fun updateNetworkStatus(
         network: Network?,
         capabilities: NetworkCapabilities? = network?.let {
             connectivityManager.getNetworkCapabilities(it)
         }
     ) {
-        val hasInternet = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        if (capabilities == null) {
+            // Shouldn't happen, but fallback
+            updateCurrentStatus()
+            return
+        }
+
+        val hasInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         val type = when {
-            capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "Wi-Fi"
-            capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "Mobile Data"
-            capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> "Ethernet"
-            else -> "None"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Mobile Data"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+            else -> "Unknown"
         }
 
         mainScope.launch {
+            Log.d("InternetMonitor", "Status Update → Connected: $hasInternet, Type: $type")
             _isConnected.value = hasInternet
             _connectionType.value = type
         }
     }
 
-    /** Clean up resources when no longer needed */
+    /**
+     * Call this in Activity.onDestroy() to prevent memory leaks.
+     */
     fun close() {
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
+            Log.d("InternetMonitor", "Network callback unregistered")
         } catch (e: Exception) {
-            // Safe to ignore
+            Log.w("InternetMonitor", "Error unregistering callback: ${e.message}")
         }
         mainScope.cancel()
+        Log.d("InternetMonitor", "Coroutine scope cancelled")
     }
 }
