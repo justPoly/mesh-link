@@ -1,32 +1,53 @@
 package com.orliczspace.mesh_link.network
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
+import android.net.*
+import androidx.compose.runtime.mutableStateOf
 
-class InternetMonitor(private val context: Context) {
+class InternetMonitor(context: Context) {
 
-    fun isInternetAvailable(): Boolean {
-        val connectivityManager =
-            context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    private val connectivityManager =
+        context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
-        val network = connectivityManager.activeNetwork ?: return false
-        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+    val isConnected = mutableStateOf(false)
+    val connectionType = mutableStateOf("Unknown")
 
-        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    init {
+        observeNetworkChanges()
+        updateCurrentStatus()
     }
 
-    fun getConnectionType(): String {
-        val connectivityManager =
-            context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    private fun observeNetworkChanges() {
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
 
-        val network = connectivityManager.activeNetwork ?: return "No Connection"
-        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return "No Connection"
+        connectivityManager.registerNetworkCallback(
+            request,
+            object : ConnectivityManager.NetworkCallback() {
 
-        return when {
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Mobile Data"
-            else -> "Unknown"
+                override fun onAvailable(network: Network) {
+                    updateCurrentStatus()
+                }
+
+                override fun onLost(network: Network) {
+                    updateCurrentStatus()
+                }
+            }
+        )
+    }
+
+    private fun updateCurrentStatus() {
+        val network = connectivityManager.activeNetwork
+        val capabilities = connectivityManager.getNetworkCapabilities(network)
+
+        isConnected.value =
+            capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+
+        connectionType.value = when {
+            capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "Wi-Fi"
+            capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "Mobile Data"
+            else -> "None"
         }
     }
 }

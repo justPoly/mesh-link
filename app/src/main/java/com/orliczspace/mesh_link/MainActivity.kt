@@ -25,8 +25,8 @@ class MainActivity : ComponentActivity() {
 
             MeshlinkTheme {
                 Dashboard(
-                    internetAvailable = internetMonitor.isInternetAvailable(),
-                    connectionType = internetMonitor.getConnectionType()
+                    internetAvailable = internetMonitor.isConnected.value,
+                    connectionType = internetMonitor.connectionType.value
                 )
             }
         }
