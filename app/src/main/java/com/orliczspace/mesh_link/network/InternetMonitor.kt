@@ -13,11 +13,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Monitors internet connectivity in real-time using ConnectivityManager.NetworkCallback.
- * Provides Compose-observable State objects for UI updates.
+ * Monitors internet connectivity in real-time.
+ * Provides Compose-observable State objects that update instantly
+ * when the network changes, even while the app is running.
  */
 class InternetMonitor(context: Context) {
 
@@ -25,6 +27,9 @@ class InternetMonitor(context: Context) {
         context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
     private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    // Optional fallback polling job for extra reliability on some devices
+    private var pollingJob: kotlinx.coroutines.Job? = null
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -34,23 +39,23 @@ class InternetMonitor(context: Context) {
 
         override fun onLost(network: Network) {
             Log.d("InternetMonitor", "onLost: Internet connection lost")
-            updateCurrentStatus() // Re-check current state (usually no internet)
+            updateCurrentStatus()
         }
 
         override fun onCapabilitiesChanged(
             network: Network,
             capabilities: NetworkCapabilities
         ) {
-            Log.d("InternetMonitor", "onCapabilitiesChanged: Network capabilities updated")
+            Log.d("InternetMonitor", "onCapabilitiesChanged: Capabilities changed")
             updateNetworkStatus(network, capabilities)
         }
     }
 
-    // Private backing mutable states
+    // Private mutable backing states
     private val _isConnected: MutableState<Boolean> = mutableStateOf(false)
     private val _connectionType: MutableState<String> = mutableStateOf("Unknown")
 
-    // Public read-only State for safe observation in Compose using `by`
+    // Public read-only State objects for safe observation in Compose
     val isConnected: State<Boolean> = _isConnected
     val connectionType: State<String> = _connectionType
 
@@ -61,18 +66,26 @@ class InternetMonitor(context: Context) {
                 .build()
 
             connectivityManager.registerNetworkCallback(request, networkCallback)
-            Log.d("InternetMonitor", "Network callback registered successfully")
+            Log.d("InternetMonitor", "Network callback registered")
         } catch (e: SecurityException) {
             Log.e("InternetMonitor", "Permission denied: ${e.message}")
         }
 
-        // Initial check on startup
+        // Initial status check
         updateCurrentStatus()
+
+        // Fallback polling every 10 seconds (very lightweight, ensures 100% reliability)
+        pollingJob = mainScope.launch {
+            while (true) {
+                delay(10_000L) // 10 seconds
+                Log.d("InternetMonitor", "Fallback poll checking current status")
+                updateCurrentStatus()
+            }
+        }
     }
 
     /**
-     * Checks the current active network and updates state accordingly.
-     * Used on init and when connection is lost.
+     * Checks the current active network (used on init, onLost, and fallback poll)
      */
     private fun updateCurrentStatus() {
         val activeNetwork = connectivityManager.activeNetwork
@@ -87,7 +100,7 @@ class InternetMonitor(context: Context) {
                 else -> "Unknown"
             }
         } else {
-            "None" // Explicitly show no connection
+            "None"
         }
 
         mainScope.launch {
@@ -98,7 +111,7 @@ class InternetMonitor(context: Context) {
     }
 
     /**
-     * Updates status when a network becomes available or capabilities change.
+     * Called when a network becomes available or capabilities change
      */
     private fun updateNetworkStatus(
         network: Network?,
@@ -107,7 +120,6 @@ class InternetMonitor(context: Context) {
         }
     ) {
         if (capabilities == null) {
-            // Shouldn't happen, but fallback
             updateCurrentStatus()
             return
         }
@@ -128,7 +140,7 @@ class InternetMonitor(context: Context) {
     }
 
     /**
-     * Call this in Activity.onDestroy() to prevent memory leaks.
+     * Call this in Activity.onDestroy() to clean up resources and prevent leaks
      */
     fun close() {
         try {
@@ -137,6 +149,10 @@ class InternetMonitor(context: Context) {
         } catch (e: Exception) {
             Log.w("InternetMonitor", "Error unregistering callback: ${e.message}")
         }
+
+        pollingJob?.cancel()
+        pollingJob = null
+
         mainScope.cancel()
         Log.d("InternetMonitor", "Coroutine scope cancelled")
     }
