@@ -2,21 +2,24 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Network & Internet -->
+    <!-- Network state (for InternetMonitor) -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Wi-Fi Direct -->
+    <!-- Wi-Fi Direct core -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
 
-    <!-- Location (required for Wi-Fi P2P discovery) -->
+    <!-- Location permissions (both required for Android 12+ compatibility) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <!-- Android 13+ Wi-Fi permissions -->
+    <!-- Android 13+ nearby devices (with privacy flag) -->
     <uses-permission
             android:name="android.permission.NEARBY_WIFI_DEVICES"
-            android:required="false" />
+            android:usesPermissionFlags="neverForLocation" />
+
+    <!-- Recommended for Wi-Fi Direct -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
             android:allowBackup="true"
@@ -27,7 +30,8 @@
             android:roundIcon="@mipmap/ic_launcher_round"
             android:supportsRtl="true"
             android:theme="@style/Theme.Meshlink"
-            tools:targetApi="31">
+            android:exported="true"
+            tools:targetApi="34">
 
         <activity
                 android:name=".MainActivity"
@@ -39,6 +43,5 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
     </application>
 </manifest>

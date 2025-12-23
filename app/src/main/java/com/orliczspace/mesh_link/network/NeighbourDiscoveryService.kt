@@ -2,9 +2,12 @@ package com.orliczspace.mesh_link.network
 
 import android.Manifest
 import android.content.*
+import android.content.pm.PackageManager
 import android.net.wifi.p2p.*
 import android.util.Log
+import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateListOf
+import androidx.core.content.ContextCompat
 
 /**
  * Handles peer discovery using Wi-Fi Direct (Wi-Fi P2P).
@@ -46,10 +49,31 @@ class NeighbourDiscoveryService(
 
                 WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> {
                     Log.d("NeighbourDiscovery", "Peer list changed")
-                    manager.requestPeers(channel, peerListListener)
+                    // Safely request peers only if permission is granted
+                    if (hasRequiredPermissions()) {
+                        manager.requestPeers(channel, peerListListener)
+                    }
                 }
             }
         }
+    }
+
+    private fun hasRequiredPermissions(): Boolean {
+        val locationPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val nearbyPermission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.NEARBY_WIFI_DEVICES
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true // Not needed on older versions
+        }
+
+        return locationPermission && nearbyPermission
     }
 
     /**
@@ -57,6 +81,12 @@ class NeighbourDiscoveryService(
      * Should be called once (e.g., in LaunchedEffect).
      */
     fun startDiscovery() {
+        if (!hasRequiredPermissions()) {
+            Log.e("NeighbourDiscovery", "Missing required permissions for Wi-Fi Direct")
+            // You should request permissions from your Activity/ViewModel here
+            return
+        }
+
         val filter = IntentFilter().apply {
             addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
             addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
@@ -64,15 +94,21 @@ class NeighbourDiscoveryService(
 
         context.registerReceiver(receiver, filter)
 
-        manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() {
-                Log.d("NeighbourDiscovery", "Peer discovery started")
-            }
+        try {
+            manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    Log.d("NeighbourDiscovery", "Peer discovery started successfully")
+                }
 
-            override fun onFailure(reason: Int) {
-                Log.e("NeighbourDiscovery", "Discovery failed: $reason")
-            }
-        })
+                override fun onFailure(reason: Int) {
+                    Log.e("NeighbourDiscovery", "Discovery failed: reason code $reason")
+                    // Reason codes: 0 = ERROR, 1 = P2P_UNSUPPORTED, 2 = BUSY
+                }
+            })
+        } catch (e: SecurityException) {
+            Log.e("NeighbourDiscovery", "SecurityException during discoverPeers: ${e.message}")
+            // Handle denied permission at runtime (e.g., inform user)
+        }
     }
 
     /**
@@ -84,7 +120,7 @@ class NeighbourDiscoveryService(
             context.unregisterReceiver(receiver)
             Log.d("NeighbourDiscovery", "Receiver unregistered")
         } catch (e: Exception) {
-            Log.w("NeighbourDiscovery", "Receiver already unregistered")
+            Log.w("NeighbourDiscovery", "Receiver already unregistered or error: ${e.message}")
         }
     }
 }
