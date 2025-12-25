@@ -16,19 +16,26 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.orliczspace.mesh_link.network.InternetMonitor
 import com.orliczspace.mesh_link.network.NeighbourDiscoveryService
+import com.orliczspace.mesh_link.network.LinkProbeService
 import com.orliczspace.mesh_link.ui.theme.MeshlinkTheme
 
 class MainActivity : ComponentActivity() {
 
-    // Hold references at Activity level to survive recompositions
+    // Hold references at Activity level
     private lateinit var internetMonitor: InternetMonitor
+    private lateinit var linkProbeService: LinkProbeService
     private var neighbourService: NeighbourDiscoveryService? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Create monitors once (not inside Compose)
+        // Initialize services ONCE
         internetMonitor = InternetMonitor(this)
+
+        linkProbeService = LinkProbeService(
+            localNodeId = Build.MODEL ?: "unknown-node"
+        )
+        linkProbeService.start()
 
         setContent {
             var hasRequiredPermissions by remember {
@@ -37,18 +44,18 @@ class MainActivity : ComponentActivity() {
 
             val permissionLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.RequestMultiplePermissions()
-            ) { results ->
+            ) {
                 hasRequiredPermissions = checkRequiredPermissions()
             }
 
-            // Automatically request permissions on launch if missing
+            // Request permissions on launch
             LaunchedEffect(Unit) {
                 if (!hasRequiredPermissions) {
                     permissionLauncher.launch(getRequiredPermissions())
                 }
             }
 
-            // Start neighbour discovery only when permissions are granted
+            // Start neighbour discovery when permissions are granted
             LaunchedEffect(hasRequiredPermissions) {
                 if (hasRequiredPermissions) {
                     if (neighbourService == null) {
@@ -56,7 +63,6 @@ class MainActivity : ComponentActivity() {
                         neighbourService?.startDiscovery()
                     }
                 } else {
-                    // Optional: stop discovery if permission revoked (rare)
                     neighbourService?.stopDiscovery()
                     neighbourService = null
                 }
@@ -64,7 +70,9 @@ class MainActivity : ComponentActivity() {
 
             val isConnected by internetMonitor.isConnected
             val connectionType by internetMonitor.connectionType
-            val discoveredPeers by remember { derivedStateOf { neighbourService?.discoveredPeers ?: emptyList() } }
+            val discoveredPeers by remember {
+                derivedStateOf { neighbourService?.discoveredPeers ?: emptyList() }
+            }
 
             MeshlinkTheme {
                 if (hasRequiredPermissions) {
@@ -74,9 +82,9 @@ class MainActivity : ComponentActivity() {
                         neighbours = discoveredPeers
                     )
                 } else {
-                    PermissionRequiredScreen(onRequestPermission = {
+                    PermissionRequiredScreen {
                         permissionLauncher.launch(getRequiredPermissions())
-                    })
+                    }
                 }
             }
         }
@@ -84,23 +92,18 @@ class MainActivity : ComponentActivity() {
 
     private fun checkRequiredPermissions(): Boolean {
         val fineLocation = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.ACCESS_FINE_LOCATION
+            this, Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
         val coarseLocation = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.ACCESS_COARSE_LOCATION
+            this, Manifest.permission.ACCESS_COARSE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
         val nearbyDevices = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.NEARBY_WIFI_DEVICES
+                this, Manifest.permission.NEARBY_WIFI_DEVICES
             ) == PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
+        } else true
 
         return fineLocation && coarseLocation && nearbyDevices
     }
@@ -122,6 +125,7 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         internetMonitor.close()
         neighbourService?.stopDiscovery()
+        linkProbeService.stop()
         neighbourService = null
     }
 }
@@ -135,7 +139,9 @@ fun Dashboard(
     neighbours: List<String>
 ) {
     val statusText = if (internetAvailable) "Connected" else "No Internet"
-    val statusColor = if (internetAvailable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+    val statusColor =
+        if (internetAvailable) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.error
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -146,67 +152,79 @@ fun Dashboard(
                 .fillMaxSize()
                 .padding(24.dp)
         ) {
-            Text(text = "MeshLink", style = MaterialTheme.typography.headlineLarge)
-            Text(text = "Smartphone-Based Mesh Network", style = MaterialTheme.typography.bodyMedium)
+            Text("MeshLink", style = MaterialTheme.typography.headlineLarge)
+            Text("Smartphone-Based Mesh Network", style = MaterialTheme.typography.bodyMedium)
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text(text = "Internet Status: $statusText", color = statusColor, style = MaterialTheme.typography.titleMedium)
-            Text(text = "Connection Type: $connectionType", style = MaterialTheme.typography.bodyLarge)
+            Text("Internet Status: $statusText", color = statusColor)
+            Text("Connection Type: $connectionType")
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            Text(text = "Mesh Nodes (${neighbours.size})", style = MaterialTheme.typography.titleMedium)
+            Text("Mesh Nodes (${neighbours.size})", style = MaterialTheme.typography.titleMedium)
 
             if (neighbours.isEmpty()) {
-                Text(text = "No nodes discovered yet", style = MaterialTheme.typography.bodyMedium)
+                Text("No nodes discovered yet")
             } else {
-                Column {
-                    neighbours.forEach { node ->
-                        Text(text = "• $node", style = MaterialTheme.typography.bodyMedium)
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
+                neighbours.forEach { node ->
+                    Text("• $node")
                 }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            Text(text = "Routing Engine", style = MaterialTheme.typography.titleMedium)
-            Text(text = "Idle", style = MaterialTheme.typography.bodyMedium)
+            Text("Routing Engine", style = MaterialTheme.typography.titleMedium)
+            Text("Idle")
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text("Routing State", style = MaterialTheme.typography.titleMedium)
+
+            if (neighbours.isEmpty()) {
+                Text("No routing data available")
+            } else {
+                neighbours.forEach { node ->
+                    RoutingStateRow(
+                        nodeName = node,
+                        linkQuality = "Probing…",
+                        latencyMs = "-"
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RoutingStateRow(
+    nodeName: String,
+    linkQuality: String,
+    latencyMs: String
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(nodeName, style = MaterialTheme.typography.bodyLarge)
+            Text("Link Quality: $linkQuality")
+            Text("Latency: $latencyMs ms")
         }
     }
 }
 
 @Composable
 fun PermissionRequiredScreen(onRequestPermission: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
+    Surface(modifier = Modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(32.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+            modifier = Modifier.padding(32.dp),
+            verticalArrangement = Arrangement.Center
         ) {
-            Text(
-                text = "Permission Required",
-                style = MaterialTheme.typography.headlineMedium,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-            )
-
+            Text("Permission Required", style = MaterialTheme.typography.headlineMedium)
             Spacer(modifier = Modifier.height(16.dp))
-
             Text(
-                text = "MeshLink needs location and nearby devices permission to discover nearby phones via Wi-Fi Direct.\n\n" +
-                        "Your location is NOT tracked or stored — it's only used for device discovery.",
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                "MeshLink needs location and nearby devices permission to discover nearby phones via Wi-Fi Direct."
             )
-
             Spacer(modifier = Modifier.height(32.dp))
-
             Button(onClick = onRequestPermission) {
                 Text("Grant Permission")
             }
