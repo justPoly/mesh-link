@@ -17,19 +17,23 @@ import androidx.core.content.ContextCompat
 import com.orliczspace.mesh_link.network.InternetMonitor
 import com.orliczspace.mesh_link.network.NeighbourDiscoveryService
 import com.orliczspace.mesh_link.network.LinkProbeService
+import com.orliczspace.mesh_link.network.RoutingStateRepository
+import com.orliczspace.mesh_link.network.AdaptiveProbeScheduler
 import com.orliczspace.mesh_link.ui.theme.MeshlinkTheme
 
 class MainActivity : ComponentActivity() {
 
-    // Hold references at Activity level
+    // Activity-level services
     private lateinit var internetMonitor: InternetMonitor
     private lateinit var linkProbeService: LinkProbeService
+    private lateinit var routingRepository: RoutingStateRepository
+    private lateinit var adaptiveProbeScheduler: AdaptiveProbeScheduler
     private var neighbourService: NeighbourDiscoveryService? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Initialize services ONCE
+        // Initialize core services ONCE
         internetMonitor = InternetMonitor(this)
 
         linkProbeService = LinkProbeService(
@@ -37,25 +41,32 @@ class MainActivity : ComponentActivity() {
         )
         linkProbeService.start()
 
+        adaptiveProbeScheduler = AdaptiveProbeScheduler(linkProbeService)
+
+        routingRepository = RoutingStateRepository(linkProbeService)
+
         setContent {
+
+            /* ---------------- PERMISSIONS ---------------- */
+
             var hasRequiredPermissions by remember {
                 mutableStateOf(checkRequiredPermissions())
             }
 
             val permissionLauncher = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.RequestMultiplePermissions()
+                ActivityResultContracts.RequestMultiplePermissions()
             ) {
                 hasRequiredPermissions = checkRequiredPermissions()
             }
 
-            // Request permissions on launch
             LaunchedEffect(Unit) {
                 if (!hasRequiredPermissions) {
                     permissionLauncher.launch(getRequiredPermissions())
                 }
             }
 
-            // Start neighbour discovery when permissions are granted
+            /* ---------------- NEIGHBOUR DISCOVERY ---------------- */
+
             LaunchedEffect(hasRequiredPermissions) {
                 if (hasRequiredPermissions) {
                     if (neighbourService == null) {
@@ -68,18 +79,49 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            /* ---------------- ROUTING STATE UPDATE ---------------- */
+
+            LaunchedEffect(neighbourService?.connectedPeers) {
+                neighbourService?.connectedPeers?.forEach { (nodeId, ip) ->
+
+                    routingRepository.updateNode(
+                        nodeId = nodeId,
+                        hasInternetAccess = false
+                    )
+
+                    adaptiveProbeScheduler.startProbing(
+                        nodeId = nodeId,
+                        address = java.net.InetAddress.getByName(ip)
+                    )
+                }
+            }
+
+            /* ---------------- OBSERVED STATE ---------------- */
+
             val isConnected by internetMonitor.isConnected
             val connectionType by internetMonitor.connectionType
+
             val discoveredPeers by remember {
-                derivedStateOf { neighbourService?.discoveredPeers ?: emptyList() }
+                derivedStateOf {
+                    neighbourService?.discoveredPeers ?: emptyList()
+                }
             }
+
+            val routingStates by remember {
+                derivedStateOf {
+                    routingRepository.routingTable.values.toList()
+                }
+            }
+
+            /* ---------------- UI ---------------- */
 
             MeshlinkTheme {
                 if (hasRequiredPermissions) {
                     Dashboard(
                         internetAvailable = isConnected,
                         connectionType = connectionType,
-                        neighbours = discoveredPeers
+                        neighbours = discoveredPeers,
+                        routingStates = routingStates
                     )
                 } else {
                     PermissionRequiredScreen {
@@ -89,6 +131,8 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    /* ---------------- PERMISSIONS HELPERS ---------------- */
 
     private fun checkRequiredPermissions(): Boolean {
         val fineLocation = ContextCompat.checkSelfPermission(
@@ -125,9 +169,11 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         internetMonitor.close()
         neighbourService?.stopDiscovery()
+        adaptiveProbeScheduler.stopAll()
         linkProbeService.stop()
         neighbourService = null
     }
+
 }
 
 /* ---------------- UI COMPOSABLES ---------------- */
@@ -136,24 +182,23 @@ class MainActivity : ComponentActivity() {
 fun Dashboard(
     internetAvailable: Boolean,
     connectionType: String,
-    neighbours: List<String>
+    neighbours: List<String>,
+    routingStates: List<com.orliczspace.mesh_link.network.RoutingState>
 ) {
     val statusText = if (internetAvailable) "Connected" else "No Internet"
     val statusColor =
         if (internetAvailable) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.error
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
+    Surface(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(24.dp)
         ) {
+
             Text("MeshLink", style = MaterialTheme.typography.headlineLarge)
-            Text("Smartphone-Based Mesh Network", style = MaterialTheme.typography.bodyMedium)
+            Text("Smartphone-Based Mesh Network")
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -163,32 +208,20 @@ fun Dashboard(
             Spacer(modifier = Modifier.height(20.dp))
 
             Text("Mesh Nodes (${neighbours.size})", style = MaterialTheme.typography.titleMedium)
-
-            if (neighbours.isEmpty()) {
-                Text("No nodes discovered yet")
-            } else {
-                neighbours.forEach { node ->
-                    Text("• $node")
-                }
-            }
+            neighbours.forEach { Text("• $it") }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            Text("Routing Engine", style = MaterialTheme.typography.titleMedium)
-            Text("Idle")
-
-            Spacer(modifier = Modifier.height(16.dp))
-
             Text("Routing State", style = MaterialTheme.typography.titleMedium)
 
-            if (neighbours.isEmpty()) {
+            if (routingStates.isEmpty()) {
                 Text("No routing data available")
             } else {
-                neighbours.forEach { node ->
+                routingStates.forEach { state ->
                     RoutingStateRow(
-                        nodeName = node,
-                        linkQuality = "Probing…",
-                        latencyMs = "-"
+                        nodeName = state.nodeId,
+                        linkQuality = "${state.stabilityScore.toInt()}%",
+                        latencyMs = state.averageLatencyMs.toString()
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }

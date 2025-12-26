@@ -1,4 +1,11 @@
 package com.orliczspace.mesh_link.network
 
-class MeshPeer {
-}
+/**
+ * Represents a connected Wi-Fi Direct peer.
+ */
+data class MeshPeer(
+    val deviceName: String,
+    val deviceAddress: String,
+    val ipAddress: String?,
+    val isGroupOwner: Boolean
+)
