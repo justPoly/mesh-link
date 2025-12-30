@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Meshlink" parent="android:Theme.Material.Light.NoActionBar"/>
+
+    <!-- Normal app theme -->
+    <style name="Theme.Meshlink" parent="Theme.MaterialComponents.DayNight.NoActionBar" />
+
 </resources>

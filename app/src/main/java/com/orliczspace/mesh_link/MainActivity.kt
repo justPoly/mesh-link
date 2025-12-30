@@ -20,6 +20,11 @@ import com.orliczspace.mesh_link.network.LinkProbeService
 import com.orliczspace.mesh_link.network.RoutingStateRepository
 import com.orliczspace.mesh_link.network.AdaptiveProbeScheduler
 import com.orliczspace.mesh_link.ui.theme.MeshlinkTheme
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+
+// ✅ NEW IMPORT
+import com.google.accompanist.systemuicontroller.rememberSystemUiController
+
 
 class MainActivity : ComponentActivity() {
 
@@ -31,6 +36,7 @@ class MainActivity : ComponentActivity() {
     private var neighbourService: NeighbourDiscoveryService? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
 
         // Initialize core services ONCE
@@ -116,6 +122,18 @@ class MainActivity : ComponentActivity() {
             /* ---------------- UI ---------------- */
 
             MeshlinkTheme {
+
+                // ✅ NEW: status bar color fix
+                val systemUiController = rememberSystemUiController()
+                val backgroundColor = MaterialTheme.colorScheme.background
+
+                SideEffect {
+                    systemUiController.setStatusBarColor(
+                        color = backgroundColor,
+                        darkIcons = true
+                    )
+                }
+
                 if (hasRequiredPermissions) {
                     Dashboard(
                         internetAvailable = isConnected,
@@ -176,6 +194,7 @@ class MainActivity : ComponentActivity() {
 
 }
 
+
 /* ---------------- UI COMPOSABLES ---------------- */
 
 @Composable
@@ -185,45 +204,83 @@ fun Dashboard(
     neighbours: List<String>,
     routingStates: List<com.orliczspace.mesh_link.network.RoutingState>
 ) {
-    val statusText = if (internetAvailable) "Connected" else "No Internet"
+    val statusText = if (internetAvailable) "Online" else "Offline"
     val statusColor =
         if (internetAvailable) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.error
 
-    Surface(modifier = Modifier.fillMaxSize()) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp)
+                .padding(20.dp)
         ) {
 
-            Text("MeshLink", style = MaterialTheme.typography.headlineLarge)
-            Text("Smartphone-Based Mesh Network")
+            /* ---------- HEADER ---------- */
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "MeshLink",
+                style = MaterialTheme.typography.headlineLarge
+            )
+            Text(
+                text = "Decentralized mobile mesh network",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
-            Text("Internet Status: $statusText", color = statusColor)
-            Text("Connection Type: $connectionType")
+            Spacer(Modifier.height(16.dp))
 
-            Spacer(modifier = Modifier.height(20.dp))
+            /* ---------- STATUS CARD ---------- */
 
-            Text("Mesh Nodes (${neighbours.size})", style = MaterialTheme.typography.titleMedium)
-            neighbours.forEach { Text("• $it") }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("Internet", style = MaterialTheme.typography.labelMedium)
+                        Text(statusText, color = statusColor)
+                    }
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
+                        Text("Connection", style = MaterialTheme.typography.labelMedium)
+                        Text(connectionType)
+                    }
+                }
+            }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(Modifier.height(20.dp))
 
-            Text("Routing State", style = MaterialTheme.typography.titleMedium)
+            /* ---------- NODES ---------- */
 
-            if (routingStates.isEmpty()) {
-                Text("No routing data available")
-            } else {
-                routingStates.forEach { state ->
-                    RoutingStateRow(
-                        nodeName = state.nodeId,
-                        linkQuality = "${state.stabilityScore.toInt()}%",
-                        latencyMs = state.averageLatencyMs.toString()
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
+            SectionCard(title = "Discovered Nodes (${neighbours.size})") {
+                if (neighbours.isEmpty()) {
+                    Text("No nearby nodes found")
+                } else {
+                    neighbours.forEach { node ->
+                        ListRow(node)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            /* ---------- ROUTING ---------- */
+
+            SectionCard(title = "Routing State") {
+                if (routingStates.isEmpty()) {
+                    Text("No routing data available")
+                } else {
+                    routingStates.forEach { state ->
+                        RoutingStateCard(state)
+                    }
                 }
             }
         }
@@ -231,16 +288,54 @@ fun Dashboard(
 }
 
 @Composable
-fun RoutingStateRow(
-    nodeName: String,
-    linkQuality: String,
-    latencyMs: String
+fun SectionCard(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(12.dp))
+            content()
+        }
+    }
+}
+
+@Composable
+fun ListRow(title: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+    ) {
+        Text("•", modifier = Modifier.padding(end = 8.dp))
+        Text(title)
+    }
+}
+
+@Composable
+fun RoutingStateCard(
+    state: com.orliczspace.mesh_link.network.RoutingState
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text(nodeName, style = MaterialTheme.typography.bodyLarge)
-            Text("Link Quality: $linkQuality")
-            Text("Latency: $latencyMs ms")
+
+            Text(
+                text = state.nodeId,
+                style = MaterialTheme.typography.bodyLarge
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            Text("Latency: ${state.averageLatencyMs} ms")
+            Text("Stability: ${state.stabilityScore.toInt()}%")
         }
     }
 }

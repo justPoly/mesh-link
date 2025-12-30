@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.Meshlink.Splash" parent="Theme.SplashScreen">
+
+        <item name="windowSplashScreenBackground">@color/mesh_blue</item>
+
+        <item name="windowSplashScreenAnimatedIcon">
+            @mipmap/ic_launcher
+        </item>
+
+        <item name="windowSplashScreenIconBackgroundColor">
+            @color/mesh_blue
+        </item>
+
+        <item name="postSplashScreenTheme">
+            @style/Theme.Meshlink
+        </item>
+
+    </style>
+
+</resources>
