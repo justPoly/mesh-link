@@ -67,17 +67,23 @@ class LinkProbeService(
         val seq = sequenceCounter++
         val timestamp = System.currentTimeMillis()
 
-        val message =
-            "PROBE_REQ|$localNodeId|$seq|$timestamp|${getCapabilities()}"
+        val message = ProbeMessage(
+            type = ProbeMessage.Type.REQUEST,
+            senderId = localNodeId,
+            sequence = seq,
+            timestamp = timestamp,
+            capabilities = getCapabilities()
+        )
 
         pendingProbes[seq] = timestamp
 
         scope.launch {
             try {
+                val data = ProbeCodec.encode(message)
                 socket?.send(
                     DatagramPacket(
-                        message.toByteArray(),
-                        message.length,
+                        data,
+                        data.size,
                         targetAddress,
                         targetPort
                     )
@@ -99,7 +105,8 @@ class LinkProbeService(
                     socket?.receive(packet)
 
                     handleMessage(
-                        message = String(packet.data, 0, packet.length),
+                        data = packet.data,
+                        length = packet.length,
                         address = packet.address,
                         port = packet.port
                     )
@@ -114,44 +121,48 @@ class LinkProbeService(
     }
 
     private fun handleMessage(
-        message: String,
+        data: ByteArray,
+        length: Int,
         address: InetAddress,
         port: Int
     ) {
-        val parts = message.split("|")
+        val message = try {
+            ProbeCodec.decode(data, length)
+        } catch (e: Exception) {
+            Log.e("LinkProbeService", "Invalid probe packet")
+            return
+        }
 
-        if (parts.size < 5) return
-
-        when (parts[0]) {
+        when (message.type) {
 
             /* ---------- PROBE REQUEST ---------- */
 
-            "PROBE_REQ" -> {
-                val senderNodeId = parts[1]
-                val seq = parts[2].toLong()
-                val requestTime = parts[3].toLong()
-                val capabilities = parts[4]
+            ProbeMessage.Type.REQUEST -> {
+                registerPeer(
+                    nodeId = message.senderId,
+                    ip = address.hostAddress,
+                    capabilities = message.capabilities
+                )
 
-                registerPeer(senderNodeId, address.hostAddress, capabilities)
-
-                sendProbeResponse(seq, requestTime, address, port)
+                sendProbeResponse(message, address, port)
             }
 
             /* ---------- PROBE RESPONSE ---------- */
 
-            "PROBE_RES" -> {
-                if (parts.size < 6) return
+            ProbeMessage.Type.RESPONSE -> {
+                registerPeer(
+                    nodeId = message.senderId,
+                    ip = address.hostAddress,
+                    capabilities = message.capabilities
+                )
 
-                val responderNodeId = parts[1]
-                val seq = parts[2].toLong()
-                val requestTime = parts[3].toLong()
-                val responseTime = parts[4].toLong()
-                val capabilities = parts[5]
+                recordRtt(
+                    neighbourId = message.senderId,
+                    requestTime = message.timestamp,
+                    responseTime = System.currentTimeMillis()
+                )
 
-                registerPeer(responderNodeId, address.hostAddress, capabilities)
-                recordRtt(responderNodeId, requestTime, responseTime)
-
-                pendingProbes.remove(seq)
+                pendingProbes.remove(message.sequence)
             }
         }
     }
@@ -159,22 +170,25 @@ class LinkProbeService(
     /* ---------------- RESPONSE SEND ---------------- */
 
     private fun sendProbeResponse(
-        seq: Long,
-        requestTime: Long,
+        request: ProbeMessage,
         address: InetAddress,
         port: Int
     ) {
-        val responseTime = System.currentTimeMillis()
-
-        val message =
-            "PROBE_RES|$localNodeId|$seq|$requestTime|$responseTime|${getCapabilities()}"
+        val response = ProbeMessage(
+            type = ProbeMessage.Type.RESPONSE,
+            senderId = localNodeId,
+            sequence = request.sequence,
+            timestamp = request.timestamp,
+            capabilities = getCapabilities()
+        )
 
         scope.launch {
             try {
+                val data = ProbeCodec.encode(response)
                 socket?.send(
                     DatagramPacket(
-                        message.toByteArray(),
-                        message.length,
+                        data,
+                        data.size,
                         address,
                         port
                     )
@@ -190,7 +204,7 @@ class LinkProbeService(
     private fun registerPeer(
         nodeId: String,
         ip: String,
-        capabilities: String
+        capabilities: Capabilities?
     ) {
         val existing = knownPeers[nodeId]
 
@@ -222,8 +236,10 @@ class LinkProbeService(
 
     /* ---------------- CAPABILITIES ---------------- */
 
-    private fun getCapabilities(): String {
-        // Future: INTERNET:1;BATTERY:80;RELAY:1
-        return "INTERNET:0"
+    private fun getCapabilities(): Capabilities {
+        // Future: battery, relay role, bandwidth, etc.
+        return Capabilities(
+            hasInternet = false
+        )
     }
 }

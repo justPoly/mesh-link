@@ -8,6 +8,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,14 +24,10 @@ import com.orliczspace.mesh_link.network.RoutingStateRepository
 import com.orliczspace.mesh_link.network.AdaptiveProbeScheduler
 import com.orliczspace.mesh_link.ui.theme.MeshlinkTheme
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-
-// ✅ NEW IMPORT
 import com.google.accompanist.systemuicontroller.rememberSystemUiController
-
 
 class MainActivity : ComponentActivity() {
 
-    // Activity-level services
     private lateinit var internetMonitor: InternetMonitor
     private lateinit var linkProbeService: LinkProbeService
     private lateinit var routingRepository: RoutingStateRepository
@@ -39,7 +38,6 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
 
-        // Initialize core services ONCE
         internetMonitor = InternetMonitor(this)
 
         linkProbeService = LinkProbeService(
@@ -48,12 +46,9 @@ class MainActivity : ComponentActivity() {
         linkProbeService.start()
 
         adaptiveProbeScheduler = AdaptiveProbeScheduler(linkProbeService)
-
         routingRepository = RoutingStateRepository(linkProbeService)
 
         setContent {
-
-            /* ---------------- PERMISSIONS ---------------- */
 
             var hasRequiredPermissions by remember {
                 mutableStateOf(checkRequiredPermissions())
@@ -71,8 +66,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            /* ---------------- NEIGHBOUR DISCOVERY ---------------- */
-
             LaunchedEffect(hasRequiredPermissions) {
                 if (hasRequiredPermissions) {
                     if (neighbourService == null) {
@@ -85,11 +78,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            /* ---------------- ROUTING STATE UPDATE ---------------- */
-
             LaunchedEffect(neighbourService?.connectedPeers) {
                 neighbourService?.connectedPeers?.forEach { (nodeId, ip) ->
-
                     routingRepository.updateNode(
                         nodeId = nodeId,
                         hasInternetAccess = false
@@ -101,8 +91,6 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
-
-            /* ---------------- OBSERVED STATE ---------------- */
 
             val isConnected by internetMonitor.isConnected
             val connectionType by internetMonitor.connectionType
@@ -119,11 +107,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            /* ---------------- UI ---------------- */
-
             MeshlinkTheme {
 
-                // ✅ NEW: status bar color fix
                 val systemUiController = rememberSystemUiController()
                 val backgroundColor = MaterialTheme.colorScheme.background
 
@@ -149,8 +134,6 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
-    /* ---------------- PERMISSIONS HELPERS ---------------- */
 
     private fun checkRequiredPermissions(): Boolean {
         val fineLocation = ContextCompat.checkSelfPermission(
@@ -191,9 +174,7 @@ class MainActivity : ComponentActivity() {
         linkProbeService.stop()
         neighbourService = null
     }
-
 }
-
 
 /* ---------------- UI COMPOSABLES ---------------- */
 
@@ -216,70 +197,73 @@ fun Dashboard(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(20.dp)
+                // ✅ Proper spacing from status bar
+                .padding(WindowInsets.statusBars.asPaddingValues())
+                .padding(horizontal = 20.dp, vertical = 20.dp)
         ) {
-
-            /* ---------- HEADER ---------- */
-
-            Text(
-                text = "MeshLink",
-                style = MaterialTheme.typography.headlineLarge
-            )
-            Text(
-                text = "Decentralized mobile mesh network",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(Modifier.height(16.dp))
-
-            /* ---------- STATUS CARD ---------- */
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                ),
+                elevation = CardDefaults.cardElevation(2.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text("Internet", style = MaterialTheme.typography.labelMedium)
-                        Text(statusText, color = statusColor)
-                    }
-                    Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
-                        Text("Connection", style = MaterialTheme.typography.labelMedium)
-                        Text(connectionType)
+                Column(modifier = Modifier.padding(24.dp)) {
+
+                    Text(
+                        text = "MeshLink",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+
+                    Spacer(Modifier.height(6.dp))
+
+                    Text(
+                        text = "Decentralized mobile mesh network",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+                    )
+
+                    Spacer(Modifier.height(16.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StatusChip(statusText, statusColor)
+                        StatusChip(connectionType, MaterialTheme.colorScheme.secondary)
                     }
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(28.dp))
 
-            /* ---------- NODES ---------- */
-
-            SectionCard(title = "Discovered Nodes (${neighbours.size})") {
+            SectionCard(title = "Nearby Nodes") {
                 if (neighbours.isEmpty()) {
-                    Text("No nearby nodes found")
+                    EmptyState("No nearby nodes found")
                 } else {
                     neighbours.forEach { node ->
-                        ListRow(node)
+                        AnimatedVisibility(
+                            visible = true,
+                            enter = fadeIn() + expandVertically()
+                        ) {
+                            ListRow(node)
+                        }
                     }
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
-
-            /* ---------- ROUTING ---------- */
+            Spacer(Modifier.height(28.dp))
 
             SectionCard(title = "Routing State") {
                 if (routingStates.isEmpty()) {
-                    Text("No routing data available")
+                    EmptyState("No routing data available")
                 } else {
                     routingStates.forEach { state ->
-                        RoutingStateCard(state)
+                        AnimatedVisibility(
+                            visible = true,
+                            enter = fadeIn() + expandVertically()
+                        ) {
+                            RoutingStateCard(state)
+                        }
                     }
                 }
             }
@@ -288,17 +272,44 @@ fun Dashboard(
 }
 
 @Composable
+fun StatusChip(label: String, color: androidx.compose.ui.graphics.Color) {
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = color.copy(alpha = 0.12f)
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+            color = color,
+            style = MaterialTheme.typography.labelMedium
+        )
+    }
+}
+
+@Composable
 fun SectionCard(
     title: String,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(1.dp)
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(12.dp))
             content()
         }
     }
+}
+
+@Composable
+fun EmptyState(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
 }
 
 @Composable
@@ -323,17 +334,12 @@ fun RoutingStateCard(
             .padding(vertical = 6.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+        ),
+        elevation = CardDefaults.cardElevation(1.dp)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-
-            Text(
-                text = state.nodeId,
-                style = MaterialTheme.typography.bodyLarge
-            )
-
-            Spacer(Modifier.height(4.dp))
-
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(state.nodeId, style = MaterialTheme.typography.bodyLarge)
+            Spacer(Modifier.height(6.dp))
             Text("Latency: ${state.averageLatencyMs} ms")
             Text("Stability: ${state.stabilityScore.toInt()}%")
         }
