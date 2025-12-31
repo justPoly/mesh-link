@@ -18,6 +18,9 @@ class AdaptiveProbeScheduler(
     // Track probe jobs per neighbour
     private val probeJobs = ConcurrentHashMap<String, Job>()
 
+    // Last successful response per node
+    private val lastResponseTime = ConcurrentHashMap<String, Long>()
+
     /**
      * Start adaptive probing for a neighbour.
      */
@@ -26,10 +29,20 @@ class AdaptiveProbeScheduler(
         address: InetAddress,
         port: Int = 8888
     ) {
-        stopProbing(nodeId)
+        if (probeJobs.containsKey(nodeId)) return
 
         val job = scope.launch {
             while (isActive) {
+
+                val now = System.currentTimeMillis()
+                val lastSeen = lastResponseTime[nodeId]
+
+                // Dead peer detection (30s timeout)
+                if (lastSeen != null && now - lastSeen > 30_000) {
+                    Log.d("AdaptiveProbe", "Peer $nodeId timed out, stopping probes")
+                    stopProbing(nodeId)
+                    return@launch
+                }
 
                 linkProbeService.sendProbe(address, port)
 
@@ -51,10 +64,18 @@ class AdaptiveProbeScheduler(
     }
 
     /**
+     * Called by LinkProbeService when a probe response is received.
+     */
+    fun notifyResponse(nodeId: String) {
+        lastResponseTime[nodeId] = System.currentTimeMillis()
+    }
+
+    /**
      * Stop probing a specific neighbour.
      */
     fun stopProbing(nodeId: String) {
         probeJobs.remove(nodeId)?.cancel()
+        lastResponseTime.remove(nodeId)
     }
 
     /**
@@ -63,6 +84,7 @@ class AdaptiveProbeScheduler(
     fun stopAll() {
         probeJobs.values.forEach { it.cancel() }
         probeJobs.clear()
+        lastResponseTime.clear()
         scope.cancel()
     }
 
@@ -74,10 +96,10 @@ class AdaptiveProbeScheduler(
         stability: Double
     ): Long {
         return when {
-            avgRtt == null -> 2000L                 // New / unknown link
-            stability > 100 -> 3000L               // Unstable
-            stability in 40.0..100.0 -> 6000L      // Moderate
-            else -> 10000L                         // Stable
+            avgRtt == null -> 2_000L
+            stability > 100 -> 3_000L
+            stability in 40.0..100.0 -> 6_000L
+            else -> 10_000L
         }
     }
 }

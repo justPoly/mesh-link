@@ -33,6 +33,9 @@ class LinkProbeService(
 
     private var sequenceCounter = 0L
 
+    // 🔽 NEW: callback for adaptive probe scheduler
+    var onProbeResponse: ((String) -> Unit)? = null
+
     /* ---------------- LIFECYCLE ---------------- */
 
     fun start() {
@@ -161,6 +164,9 @@ class LinkProbeService(
                     requestTime = message.timestamp,
                     responseTime = System.currentTimeMillis()
                 )
+
+                // 🔽 NEW: notify adaptive scheduler
+                onProbeResponse?.invoke(message.senderId)
 
                 pendingProbes.remove(message.sequence)
             }

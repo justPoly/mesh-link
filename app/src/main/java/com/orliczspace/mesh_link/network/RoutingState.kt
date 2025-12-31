@@ -6,15 +6,9 @@ package com.orliczspace.mesh_link.network
  */
 data class RoutingState(
     val nodeId: String,
-    val lastSeenTimestamp: Long,
-
-    // Probe-based metrics
-    val averageLatencyMs: Long,
-    val packetLossRate: Double,
-
-    // Stability score derived from probe success rate
-    val stabilityScore: Double,
-
-    // Whether this node currently has internet access
-    val hasInternetAccess: Boolean
+    val averageLatencyMs: Long = Long.MAX_VALUE,
+    val stabilityScore: Double = 0.0,
+    val hasInternetAccess: Boolean = false,
+    val gatewayScore: Double = 0.0,
+    val isGateway: Boolean = false
 )

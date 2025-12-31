@@ -197,7 +197,7 @@ fun Dashboard(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                // ✅ Proper spacing from status bar
+                // Proper spacing from status bar
                 .padding(WindowInsets.statusBars.asPaddingValues())
                 .padding(horizontal = 20.dp, vertical = 20.dp)
         ) {
