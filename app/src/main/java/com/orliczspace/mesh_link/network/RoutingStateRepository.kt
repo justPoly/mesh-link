@@ -61,4 +61,24 @@ class RoutingStateRepository(
 
         return gateway
     }
+
+    fun getRouteToInternet(localNodeId: String): RouteDecision? {
+        val gateway = routingTable.values.firstOrNull { it.isGateway }
+            ?: return null
+
+        return if (gateway.nodeId == localNodeId) {
+            // We ARE the gateway
+            RouteDecision(
+                destination = "INTERNET",
+                nextHopNodeId = localNodeId,
+                viaGateway = false
+            )
+        } else {
+            RouteDecision(
+                destination = "INTERNET",
+                nextHopNodeId = gateway.nodeId,
+                viaGateway = true
+            )
+        }
+    }
 }

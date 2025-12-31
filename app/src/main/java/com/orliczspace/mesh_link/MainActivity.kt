@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -17,14 +18,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.orliczspace.mesh_link.network.InternetMonitor
-import com.orliczspace.mesh_link.network.NeighbourDiscoveryService
-import com.orliczspace.mesh_link.network.LinkProbeService
-import com.orliczspace.mesh_link.network.RoutingStateRepository
-import com.orliczspace.mesh_link.network.AdaptiveProbeScheduler
-import com.orliczspace.mesh_link.ui.theme.MeshlinkTheme
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.google.accompanist.systemuicontroller.rememberSystemUiController
+import com.orliczspace.mesh_link.network.*
+import com.orliczspace.mesh_link.ui.theme.MeshlinkTheme
+import java.net.InetAddress
 
 class MainActivity : ComponentActivity() {
 
@@ -50,6 +48,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
 
+            /* ---------------- Permissions ---------------- */
+
             var hasRequiredPermissions by remember {
                 mutableStateOf(checkRequiredPermissions())
             }
@@ -65,6 +65,8 @@ class MainActivity : ComponentActivity() {
                     permissionLauncher.launch(getRequiredPermissions())
                 }
             }
+
+            /* ---------------- Discovery lifecycle ---------------- */
 
             LaunchedEffect(hasRequiredPermissions) {
                 if (hasRequiredPermissions) {
@@ -87,10 +89,12 @@ class MainActivity : ComponentActivity() {
 
                     adaptiveProbeScheduler.startProbing(
                         nodeId = nodeId,
-                        address = java.net.InetAddress.getByName(ip)
+                        address = InetAddress.getByName(ip)
                     )
                 }
             }
+
+            /* ---------------- Observable state ---------------- */
 
             val isConnected by internetMonitor.isConnected
             val connectionType by internetMonitor.connectionType
@@ -107,12 +111,31 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            /* Gateway election triggered by probe-derived updates */
+            /* ---------------- Routing logic ---------------- */
+
+            // Gateway election on probe updates
             LaunchedEffect(routingStates) {
                 if (routingStates.isNotEmpty()) {
                     routingRepository.electGateway()
                 }
             }
+
+            // Route decision logging
+            LaunchedEffect(routingStates) {
+                val route = routingRepository.getRouteToInternet(
+                    localNodeId = Build.MODEL ?: "unknown-node"
+                )
+
+                route?.let { decision ->
+                    Log.d(
+                        "Routing",
+                        "Route to internet via ${decision.nextHopNodeId} " +
+                                "(gateway=${decision.viaGateway})"
+                    )
+                }
+            }
+
+            /* ---------------- UI ---------------- */
 
             MeshlinkTheme {
 
@@ -141,6 +164,8 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    /* ---------------- Permissions helpers ---------------- */
 
     private fun checkRequiredPermissions(): Boolean {
         val fineLocation = ContextCompat.checkSelfPermission(
@@ -190,7 +215,7 @@ fun Dashboard(
     internetAvailable: Boolean,
     connectionType: String,
     neighbours: List<String>,
-    routingStates: List<com.orliczspace.mesh_link.network.RoutingState>
+    routingStates: List<RoutingState>
 ) {
     val statusText = if (internetAvailable) "Online" else "Offline"
     val statusColor =
@@ -204,7 +229,6 @@ fun Dashboard(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                // Proper spacing from status bar
                 .padding(WindowInsets.statusBars.asPaddingValues())
                 .padding(horizontal = 20.dp, vertical = 20.dp)
         ) {
@@ -213,23 +237,20 @@ fun Dashboard(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
-                ),
-                elevation = CardDefaults.cardElevation(2.dp)
+                )
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
 
                     Text(
                         text = "MeshLink",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        style = MaterialTheme.typography.headlineMedium
                     )
 
                     Spacer(Modifier.height(6.dp))
 
                     Text(
                         text = "Decentralized mobile mesh network",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+                        style = MaterialTheme.typography.bodyMedium
                     )
 
                     Spacer(Modifier.height(16.dp))
@@ -278,6 +299,8 @@ fun Dashboard(
     }
 }
 
+/* ---------------- UI helpers ---------------- */
+
 @Composable
 fun StatusChip(label: String, color: androidx.compose.ui.graphics.Color) {
     Surface(
@@ -287,8 +310,7 @@ fun StatusChip(label: String, color: androidx.compose.ui.graphics.Color) {
         Text(
             text = label,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-            color = color,
-            style = MaterialTheme.typography.labelMedium
+            color = color
         )
     }
 }
@@ -298,10 +320,7 @@ fun SectionCard(
     title: String,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(1.dp)
-    ) {
+    Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(18.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(12.dp))
@@ -312,37 +331,26 @@ fun SectionCard(
 
 @Composable
 fun EmptyState(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
+    Text(text, style = MaterialTheme.typography.bodyMedium)
 }
 
 @Composable
 fun ListRow(title: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp)
-    ) {
-        Text("•", modifier = Modifier.padding(end = 8.dp))
+    Row(modifier = Modifier.padding(vertical = 6.dp)) {
+        Text("• ", modifier = Modifier.padding(end = 6.dp))
         Text(title)
     }
 }
 
 @Composable
-fun RoutingStateCard(
-    state: com.orliczspace.mesh_link.network.RoutingState
-) {
+fun RoutingStateCard(state: RoutingState) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
-        ),
-        elevation = CardDefaults.cardElevation(1.dp)
+        )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(state.nodeId, style = MaterialTheme.typography.bodyLarge)
@@ -363,7 +371,7 @@ fun PermissionRequiredScreen(onRequestPermission: () -> Unit) {
             Text("Permission Required", style = MaterialTheme.typography.headlineMedium)
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                "MeshLink needs location and nearby devices permission to discover nearby phones via Wi-Fi Direct."
+                "MeshLink needs location and nearby devices permission to discover nearby phones."
             )
             Spacer(modifier = Modifier.height(32.dp))
             Button(onClick = onRequestPermission) {
