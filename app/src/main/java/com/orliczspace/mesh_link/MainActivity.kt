@@ -107,6 +107,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            /* Gateway election triggered by probe-derived updates */
+            LaunchedEffect(routingStates) {
+                if (routingStates.isNotEmpty()) {
+                    routingRepository.electGateway()
+                }
+            }
+
             MeshlinkTheme {
 
                 val systemUiController = rememberSystemUiController()

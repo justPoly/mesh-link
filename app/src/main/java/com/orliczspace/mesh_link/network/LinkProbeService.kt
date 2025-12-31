@@ -165,7 +165,7 @@ class LinkProbeService(
                     responseTime = System.currentTimeMillis()
                 )
 
-                // 🔽 NEW: notify adaptive scheduler
+                // NEW: notify adaptive scheduler
                 onProbeResponse?.invoke(message.senderId)
 
                 pendingProbes.remove(message.sequence)
@@ -229,6 +229,7 @@ class LinkProbeService(
         neighbourId: String,
         requestTime: Long,
         responseTime: Long
+
     ) {
         val rtt = responseTime - requestTime
         val history =
@@ -241,7 +242,6 @@ class LinkProbeService(
     }
 
     /* ---------------- CAPABILITIES ---------------- */
-
     private fun getCapabilities(): Capabilities {
         // Future: battery, relay role, bandwidth, etc.
         return Capabilities(

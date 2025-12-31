@@ -21,13 +21,6 @@ class RoutingStateRepository(
         val avgRtt = linkProbeService.getAverageRtt(nodeId) ?: -1
         val stability = linkProbeService.getStability(nodeId)
 
-        // Packet loss heuristic (temporary model)
-        val packetLossRate = when {
-            stability <= 20 -> 0.05
-            stability <= 50 -> 0.15
-            else -> 0.3
-        }
-
         // Normalized stability score (0–100)
         val stabilityScore = when {
             stability <= 10 -> 100.0
@@ -39,9 +32,7 @@ class RoutingStateRepository(
 
         routingTable[nodeId] = RoutingState(
             nodeId = nodeId,
-            lastSeenTimestamp = System.currentTimeMillis(),
             averageLatencyMs = max(avgRtt, 0),
-            packetLossRate = packetLossRate,
             stabilityScore = stabilityScore,
             hasInternetAccess = hasInternetAccess
         )
@@ -49,5 +40,25 @@ class RoutingStateRepository(
 
     fun removeNode(nodeId: String) {
         routingTable.remove(nodeId)
+    }
+
+    /**
+     * Elect the best gateway based on computed gateway score.
+     */
+    fun electGateway(): RoutingState? {
+        val updatedStates = routingTable.values.map { state ->
+            val score = GatewayScorer.score(state)
+            state.copy(gatewayScore = score)
+        }
+
+        val gateway = updatedStates.maxByOrNull { it.gatewayScore }
+
+        routingTable.clear()
+        updatedStates.forEach { state ->
+            routingTable[state.nodeId] =
+                state.copy(isGateway = state.nodeId == gateway?.nodeId)
+        }
+
+        return gateway
     }
 }
