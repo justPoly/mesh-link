@@ -29,6 +29,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var internetMonitor: InternetMonitor
     private lateinit var linkProbeService: LinkProbeService
     private lateinit var routingRepository: RoutingStateRepository
+    private lateinit var packetForwarder: PacketForwarder
     private lateinit var adaptiveProbeScheduler: AdaptiveProbeScheduler
     private var neighbourService: NeighbourDiscoveryService? = null
 
@@ -45,6 +46,12 @@ class MainActivity : ComponentActivity() {
 
         adaptiveProbeScheduler = AdaptiveProbeScheduler(linkProbeService)
         routingRepository = RoutingStateRepository(linkProbeService)
+        packetForwarder = PacketForwarder(
+            localNodeId = Build.MODEL ?: "unknown-node",
+            routingRepository = routingRepository,
+            linkProbeService = linkProbeService
+        )
+
 
         setContent {
 
