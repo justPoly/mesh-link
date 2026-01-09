@@ -10,11 +10,14 @@ class PacketForwarder(
     private val localNodeId: String,
     private val routingRepository: RoutingStateRepository,
     private val linkProbeService: LinkProbeService,
-    private val listenPort: Int = 9999
+    private val listenPort: Int = 9999,
+    private val deliveryListener: PacketDeliveryListener
 ) {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var socket: DatagramSocket? = null
+
+    /* ---------------- LIFECYCLE ---------------- */
 
     fun start() {
         socket = DatagramSocket(listenPort)
@@ -25,6 +28,8 @@ class PacketForwarder(
     fun stop() {
         scope.cancel()
         socket?.close()
+        socket = null
+        Log.d("PacketForwarder", "Stopped")
     }
 
     /* ---------------- RECEIVE ---------------- */
@@ -39,7 +44,10 @@ class PacketForwarder(
                     handlePacket(packet)
                 } catch (e: Exception) {
                     if (isActive) {
-                        Log.e("PacketForwarder", "Receive error: ${e.message}")
+                        Log.e(
+                            "PacketForwarder",
+                            "Receive error: ${e.message}"
+                        )
                     }
                 }
             }
@@ -53,11 +61,14 @@ class PacketForwarder(
         )
 
         if (forwardPacket.ttl <= 0) {
-            Log.d("PacketForwarder", "Dropped packet (TTL expired)")
+            Log.d(
+                "PacketForwarder",
+                "Dropped packet (TTL expired)"
+            )
             return
         }
 
-        // Packet reached destination
+        // Packet reached destination node
         if (forwardPacket.destinationNodeId == localNodeId) {
             onPacketDelivered(forwardPacket)
             return
@@ -68,26 +79,52 @@ class PacketForwarder(
 
     /* ---------------- FORWARD ---------------- */
 
+    fun forwardRawIpPacket(rawPacket: ByteArray) {
+        val forwardPacket = ForwardPacket(
+            sourceNodeId = localNodeId,
+            destinationNodeId = null, // internet-bound
+            ttl = 8,
+            payload = rawPacket
+        )
+
+        forward(forwardPacket)
+    }
+
     private fun forward(packet: ForwardPacket) {
         val route = routingRepository.getRouteToInternet(localNodeId)
+
         if (route == null) {
-            Log.d("PacketForwarder", "No route available, dropping packet")
-            return
-        }
-
-        val nextHopIp =
-            linkProbeService.getKnownPeers()[route.nextHopNodeId]
-
-        if (nextHopIp == null) {
             Log.d(
                 "PacketForwarder",
-                "Next hop IP unknown for ${route.nextHopNodeId}"
+                "No route available, dropping packet"
             )
             return
         }
 
-        val forwarded = packet.copy(ttl = packet.ttl - 1)
-        val data = ForwardPacketCodec.encode(forwarded)
+        // If we are the gateway, consume locally
+        if (!route.viaGateway) {
+            onPacketDelivered(packet)
+            return
+        }
+
+        val nextHopNodeId = route.nextHopNodeId ?: return
+
+        val nextHopIp =
+            linkProbeService.getKnownPeers()[nextHopNodeId]
+
+        if (nextHopIp == null) {
+            Log.d(
+                "PacketForwarder",
+                "Next hop IP unknown for $nextHopNodeId"
+            )
+            return
+        }
+
+        val forwardedPacket = packet.copy(
+            ttl = packet.ttl - 1
+        )
+
+        val data = ForwardPacketCodec.encode(forwardedPacket)
 
         scope.launch {
             try {
@@ -102,11 +139,14 @@ class PacketForwarder(
 
                 Log.d(
                     "PacketForwarder",
-                    "Forwarded packet to ${route.nextHopNodeId} @ $nextHopIp"
+                    "Forwarded packet to $nextHopNodeId @ $nextHopIp"
                 )
 
             } catch (e: Exception) {
-                Log.e("PacketForwarder", "Forward error: ${e.message}")
+                Log.e(
+                    "PacketForwarder",
+                    "Forward error: ${e.message}"
+                )
             }
         }
     }
@@ -120,6 +160,11 @@ class PacketForwarder(
                     "(${packet.payload.size} bytes)"
         )
 
-        // Future: pass payload to app / proxy layer
+        deliveryListener.onPacketDelivered(packet.payload)
+    }
+    /* ---------------- CALLBACK ---------------- */
+
+    interface PacketDeliveryListener {
+        fun onPacketDelivered(payload: ByteArray)
     }
 }

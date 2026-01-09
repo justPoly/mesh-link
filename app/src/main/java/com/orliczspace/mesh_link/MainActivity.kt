@@ -1,7 +1,9 @@
 package com.orliczspace.mesh_link
-
+import android.os.IBinder
 import android.Manifest
+import android.content.*
 import android.content.pm.PackageManager
+import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -21,21 +23,51 @@ import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.google.accompanist.systemuicontroller.rememberSystemUiController
 import com.orliczspace.mesh_link.network.*
+import com.orliczspace.mesh_link.network.vpn.MeshVpnService
 import com.orliczspace.mesh_link.ui.theme.MeshlinkTheme
 import java.net.InetAddress
 
 class MainActivity : ComponentActivity() {
+
+    companion object {
+        private const val VPN_REQUEST_CODE = 1001
+    }
 
     private lateinit var internetMonitor: InternetMonitor
     private lateinit var linkProbeService: LinkProbeService
     private lateinit var routingRepository: RoutingStateRepository
     private lateinit var packetForwarder: PacketForwarder
     private lateinit var adaptiveProbeScheduler: AdaptiveProbeScheduler
+
     private var neighbourService: NeighbourDiscoveryService? = null
+    private var meshVpnService: MeshVpnService? = null
+
+    /* ---------------- VPN SERVICE CONNECTION ---------------- */
+
+    private val vpnConnection = object : ServiceConnection {
+
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            val service =
+                (binder as MeshVpnService.LocalBinder).getService()
+
+            meshVpnService = service
+            meshVpnService?.attachPacketForwarder(packetForwarder)
+
+            packetForwarder.start()
+
+            Log.d("VPN", "MeshVpnService connected")
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            meshVpnService = null
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+
+        /* ---------------- Core services ---------------- */
 
         internetMonitor = InternetMonitor(this)
 
@@ -46,16 +78,23 @@ class MainActivity : ComponentActivity() {
 
         adaptiveProbeScheduler = AdaptiveProbeScheduler(linkProbeService)
         routingRepository = RoutingStateRepository(linkProbeService)
+
         packetForwarder = PacketForwarder(
             localNodeId = Build.MODEL ?: "unknown-node",
             routingRepository = routingRepository,
-            linkProbeService = linkProbeService
+            linkProbeService = linkProbeService,
+            deliveryListener = object :
+                PacketForwarder.PacketDeliveryListener {
+
+                override fun onPacketDelivered(payload: ByteArray) {
+                    meshVpnService?.writeToTun(payload)
+                }
+            }
         )
 
+        /* ---------------- UI ---------------- */
 
         setContent {
-
-            /* ---------------- Permissions ---------------- */
 
             var hasRequiredPermissions by remember {
                 mutableStateOf(checkRequiredPermissions())
@@ -73,12 +112,21 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            /* ---------------- VPN startup ---------------- */
+
+            LaunchedEffect(hasRequiredPermissions) {
+                if (hasRequiredPermissions) {
+                    startMeshVpn()
+                }
+            }
+
             /* ---------------- Discovery lifecycle ---------------- */
 
             LaunchedEffect(hasRequiredPermissions) {
                 if (hasRequiredPermissions) {
                     if (neighbourService == null) {
-                        neighbourService = NeighbourDiscoveryService(this@MainActivity)
+                        neighbourService =
+                            NeighbourDiscoveryService(this@MainActivity)
                         neighbourService?.startDiscovery()
                     }
                 } else {
@@ -101,8 +149,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            /* ---------------- Observable state ---------------- */
-
             val isConnected by internetMonitor.isConnected
             val connectionType by internetMonitor.connectionType
 
@@ -118,31 +164,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            /* ---------------- Routing logic ---------------- */
-
-            // Gateway election on probe updates
             LaunchedEffect(routingStates) {
                 if (routingStates.isNotEmpty()) {
                     routingRepository.electGateway()
                 }
             }
-
-            // Route decision logging
-            LaunchedEffect(routingStates) {
-                val route = routingRepository.getRouteToInternet(
-                    localNodeId = Build.MODEL ?: "unknown-node"
-                )
-
-                route?.let { decision ->
-                    Log.d(
-                        "Routing",
-                        "Route to internet via ${decision.nextHopNodeId} " +
-                                "(gateway=${decision.viaGateway})"
-                    )
-                }
-            }
-
-            /* ---------------- UI ---------------- */
 
             MeshlinkTheme {
 
@@ -172,6 +198,35 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /* ---------------- VPN helpers ---------------- */
+
+    private fun startMeshVpn() {
+        val intent = VpnService.prepare(this)
+        if (intent != null) {
+            startActivityForResult(intent, VPN_REQUEST_CODE)
+        } else {
+            startVpnService()
+        }
+    }
+
+    private fun startVpnService() {
+        val intent = Intent(this, MeshVpnService::class.java)
+        startService(intent)
+        bindService(intent, vpnConnection, BIND_AUTO_CREATE)
+    }
+
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: Intent?
+    ) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == VPN_REQUEST_CODE && resultCode == RESULT_OK) {
+            startVpnService()
+        }
+    }
+
     /* ---------------- Permissions helpers ---------------- */
 
     private fun checkRequiredPermissions(): Boolean {
@@ -183,11 +238,12 @@ class MainActivity : ComponentActivity() {
             this, Manifest.permission.ACCESS_COARSE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
-        val nearbyDevices = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(
-                this, Manifest.permission.NEARBY_WIFI_DEVICES
-            ) == PackageManager.PERMISSION_GRANTED
-        } else true
+        val nearbyDevices =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.NEARBY_WIFI_DEVICES
+                ) == PackageManager.PERMISSION_GRANTED
+            } else true
 
         return fineLocation && coarseLocation && nearbyDevices
     }
@@ -211,6 +267,7 @@ class MainActivity : ComponentActivity() {
         neighbourService?.stopDiscovery()
         adaptiveProbeScheduler.stopAll()
         linkProbeService.stop()
+        unbindService(vpnConnection)
         neighbourService = null
     }
 }

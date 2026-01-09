@@ -70,7 +70,7 @@ class RoutingStateRepository(
             // We ARE the gateway
             RouteDecision(
                 destination = "INTERNET",
-                nextHopNodeId = localNodeId,
+                nextHopNodeId = null,
                 viaGateway = false
             )
         } else {
