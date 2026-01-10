@@ -6,6 +6,7 @@ import android.os.Binder
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import com.orliczspace.mesh_link.network.ForwardPacket
 import com.orliczspace.mesh_link.network.PacketForwarder
 import kotlinx.coroutines.*
 import java.io.FileInputStream
@@ -55,6 +56,7 @@ class MeshVpnService : VpnService() {
         super.onDestroy()
         scope.cancel()
         tunInterface?.close()
+        tunInterface = null
     }
 
     /* ---------------- VPN Setup ---------------- */
@@ -67,9 +69,9 @@ class MeshVpnService : VpnService() {
             .setBlocking(true)
 
         tunInterface = builder.establish()
-
-        val fd = tunInterface?.fileDescriptor
             ?: throw IllegalStateException("VPN establish failed")
+
+        val fd = tunInterface!!.fileDescriptor
 
         tunInput = FileInputStream(fd)
         tunOutput = FileOutputStream(fd)
@@ -81,13 +83,23 @@ class MeshVpnService : VpnService() {
 
     private fun startTunReader() {
         scope.launch {
-            val buffer = ByteArray(32767)
+            val buffer = ByteArray(65535)
 
             while (isActive) {
                 try {
                     val len = tunInput?.read(buffer) ?: break
                     if (len > 0) {
-                        packetForwarder?.forwardRawIpPacket(buffer.copyOf(len))
+                        val rawPacket = buffer.copyOf(len)
+
+                        val forwardPacket = ForwardPacket(
+                            sourceNodeId = android.os.Build.MODEL ?: "unknown-node",
+                            destinationNodeId = null, // internet-bound
+                            ttl = 8,
+                            payload = rawPacket
+                        )
+
+                        packetForwarder?.send(forwardPacket)
+                            ?: Log.w(TAG, "PacketForwarder not attached yet")
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "TUN read error: ${e.message}")
@@ -107,5 +119,6 @@ class MeshVpnService : VpnService() {
 
     fun attachPacketForwarder(forwarder: PacketForwarder) {
         packetForwarder = forwarder
+        Log.d(TAG, "PacketForwarder attached")
     }
 }
