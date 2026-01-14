@@ -1,11 +1,11 @@
 package com.orliczspace.mesh_link.network
 
 import android.util.Log
-import com.orliczspace.mesh_link.network.gateway.GatewayNatService
 import kotlinx.coroutines.*
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import com.orliczspace.mesh_link.network.gateway.GatewayNatService
 
 class PacketForwarder(
     private val localNodeId: String,
@@ -19,6 +19,7 @@ class PacketForwarder(
     private var socket: DatagramSocket? = null
 
     private val gatewayNatService = GatewayNatService { response ->
+        // Internet → Mesh return path
         deliveryListener.onPacketDelivered(response)
     }
 
@@ -26,23 +27,23 @@ class PacketForwarder(
 
     fun start() {
         socket = DatagramSocket(listenPort)
+        gatewayNatService.start()
         listen()
         Log.d("PacketForwarder", "Started on port $listenPort")
     }
 
     fun stop() {
         scope.cancel()
+        gatewayNatService.stop()
         socket?.close()
         socket = null
-        gatewayNatService.stop()
-        Log.d("PacketForwarder", "Stopped")
     }
 
     /* ---------------- RECEIVE ---------------- */
 
     private fun listen() {
         scope.launch {
-            val buffer = ByteArray(65535) // Max IP packet size
+            val buffer = ByteArray(65535)
             while (isActive) {
                 try {
                     val packet = DatagramPacket(buffer, buffer.size)
@@ -63,44 +64,32 @@ class PacketForwarder(
             packet.length
         )
 
-        if (forwardPacket.ttl <= 0) {
-            Log.d("PacketForwarder", "Dropped packet (TTL expired)")
-            return
-        }
+        if (forwardPacket.ttl <= 0) return
 
         val route = routingRepository.getRouteToInternet(localNodeId)
 
-        /* ---------- CASE 1: Mesh → Mesh ---------- */
+        // Case 1: Packet addressed to this node
         if (forwardPacket.destinationNodeId == localNodeId) {
-            deliverToLocal(forwardPacket)
+            onPacketDelivered(forwardPacket)
             return
         }
 
-        /* ---------- CASE 2: Internet-bound & we are gateway ---------- */
-        if (
-            forwardPacket.destinationNodeId == null &&
+        // Case 2: Internet-bound and we are gateway
+        if (forwardPacket.destinationNodeId == null &&
             route != null &&
             !route.viaGateway
         ) {
-            gatewayNatService.handleIpPacket(forwardPacket.payload)
+            gatewayNatService.sendToInternet(
+                forwardPacket.payload,
+                InetAddress.getByName("8.8.8.8") // Example destination
+            )
             return
         }
 
-        /* ---------- CASE 3: Forward through mesh ---------- */
         forward(forwardPacket)
     }
 
     /* ---------------- FORWARD ---------------- */
-
-    fun forwardRawIpPacket(rawPacket: ByteArray) {
-        val forwardPacket = ForwardPacket(
-            sourceNodeId = localNodeId,
-            destinationNodeId = null, // Internet-bound
-            ttl = 8,
-            payload = rawPacket
-        )
-        forward(forwardPacket)
-    }
 
     fun send(packet: ForwardPacket) {
         forward(packet)
@@ -108,25 +97,16 @@ class PacketForwarder(
 
     private fun forward(packet: ForwardPacket) {
         val route = routingRepository.getRouteToInternet(localNodeId)
+            ?: return
 
-        if (route == null) {
-            Log.d("PacketForwarder", "No route available, dropping packet")
-            return
-        }
-
-        // Gateway should not forward further
         if (!route.viaGateway) {
-            gatewayNatService.handleIpPacket(packet.payload)
+            onPacketDelivered(packet)
             return
         }
 
         val nextHopNodeId = route.nextHopNodeId ?: return
         val nextHopIp = linkProbeService.getKnownPeers()[nextHopNodeId]
-
-        if (nextHopIp == null) {
-            Log.d("PacketForwarder", "Next hop IP unknown for $nextHopNodeId")
-            return
-        }
+            ?: return
 
         val forwardedPacket = packet.copy(ttl = packet.ttl - 1)
         val data = ForwardPacketCodec.encode(forwardedPacket)
@@ -141,11 +121,6 @@ class PacketForwarder(
                         listenPort
                     )
                 )
-
-                Log.d(
-                    "PacketForwarder",
-                    "Forwarded packet to $nextHopNodeId @ $nextHopIp"
-                )
             } catch (e: Exception) {
                 Log.e("PacketForwarder", "Forward error: ${e.message}")
             }
@@ -154,12 +129,7 @@ class PacketForwarder(
 
     /* ---------------- DELIVERY ---------------- */
 
-    private fun deliverToLocal(packet: ForwardPacket) {
-        Log.d(
-            "PacketForwarder",
-            "Packet delivered from ${packet.sourceNodeId} " +
-                    "(${packet.payload.size} bytes)"
-        )
+    private fun onPacketDelivered(packet: ForwardPacket) {
         deliveryListener.onPacketDelivered(packet.payload)
     }
 
