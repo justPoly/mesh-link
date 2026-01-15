@@ -5,68 +5,49 @@ import kotlinx.coroutines.*
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
-import java.util.concurrent.ConcurrentHashMap
 
 class GatewayNatService(
-    private val onMeshResponse: (ByteArray) -> Unit
+    private val onInboundPacket: (NatEntry, ByteArray) -> Unit
 ) {
 
-    companion object {
-        private const val TAG = "GatewayNatService"
-        private const val INTERNET_PORT = 0 // system assigned
-    }
-
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val socket = DatagramSocket(INTERNET_PORT)
+    private val socket = DatagramSocket()
 
-    // Maps mesh-flow → internet endpoint
-    private val natTable = ConcurrentHashMap<Int, InetAddress>()
+    /**
+     * Handles an outbound raw IP packet coming from the mesh gateway.
+     * This sends it to the real internet and waits for a response.
+     */
+    fun handleOutbound(rawIpPacket: ByteArray) {
+        val natEntry = NatEntry.createFromIpPacket(rawIpPacket)
 
-    fun start() {
-        listenForInternetResponses()
-        Log.d(TAG, "Gateway NAT started")
+        scope.launch {
+            try {
+                val outgoing = DatagramPacket(
+                    natEntry.payload,
+                    natEntry.payload.size,
+                    InetAddress.getByName(natEntry.destIp),
+                    natEntry.destPort
+                )
+
+                socket.send(outgoing)
+
+                val buffer = ByteArray(65535)
+                val response = DatagramPacket(buffer, buffer.size)
+                socket.receive(response)
+
+                onInboundPacket(
+                    natEntry,
+                    response.data.copyOf(response.length)
+                )
+
+            } catch (e: Exception) {
+                Log.e("GatewayNatService", "NAT handling failed", e)
+            }
+        }
     }
 
     fun stop() {
         scope.cancel()
         socket.close()
-    }
-
-    fun sendToInternet(meshPayload: ByteArray, destination: InetAddress) {
-        val port = socket.localPort
-        natTable[port] = destination
-
-        val packet = DatagramPacket(
-            meshPayload,
-            meshPayload.size,
-            destination,
-            80 // Example: HTTP (you can make this dynamic)
-        )
-
-        socket.send(packet)
-    }
-
-    private fun listenForInternetResponses() {
-        scope.launch {
-            val buffer = ByteArray(65535)
-
-            while (isActive) {
-                try {
-                    val packet = DatagramPacket(buffer, buffer.size)
-                    socket.receive(packet)
-
-                    Log.d(TAG, "Internet response received")
-
-                    onMeshResponse(
-                        packet.data.copyOf(packet.length)
-                    )
-
-                } catch (e: Exception) {
-                    if (isActive) {
-                        Log.e(TAG, "NAT receive error: ${e.message}")
-                    }
-                }
-            }
-        }
     }
 }

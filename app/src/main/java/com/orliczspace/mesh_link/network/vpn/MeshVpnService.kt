@@ -34,9 +34,7 @@ class MeshVpnService : VpnService() {
 
     private val binder = LocalBinder()
 
-    override fun onBind(intent: Intent?): IBinder {
-        return binder
-    }
+    override fun onBind(intent: Intent?): IBinder = binder
 
     /* ---------------- Lifecycle ---------------- */
 
@@ -55,7 +53,13 @@ class MeshVpnService : VpnService() {
     override fun onDestroy() {
         super.onDestroy()
         scope.cancel()
+
+        tunInput?.close()
+        tunOutput?.close()
         tunInterface?.close()
+
+        tunInput = null
+        tunOutput = null
         tunInterface = null
     }
 
@@ -72,7 +76,6 @@ class MeshVpnService : VpnService() {
             ?: throw IllegalStateException("VPN establish failed")
 
         val fd = tunInterface!!.fileDescriptor
-
         tunInput = FileInputStream(fd)
         tunOutput = FileOutputStream(fd)
 
@@ -83,39 +86,44 @@ class MeshVpnService : VpnService() {
 
     private fun startTunReader() {
         scope.launch {
-            val buffer = ByteArray(65535)
+            val buffer = ByteArray(65535) // max IP packet size
 
             while (isActive) {
                 try {
                     val len = tunInput?.read(buffer) ?: break
-                    if (len > 0) {
-                        val rawPacket = buffer.copyOf(len)
+                    if (len <= 0) continue
 
-                        val forwardPacket = ForwardPacket(
-                            sourceNodeId = android.os.Build.MODEL ?: "unknown-node",
-                            destinationNodeId = null, // internet-bound
-                            ttl = 8,
-                            payload = rawPacket
-                        )
+                    val rawPacket = buffer.copyOf(len)
 
-                        packetForwarder?.send(forwardPacket)
-                            ?: Log.w(TAG, "PacketForwarder not attached yet")
-                    }
+                    val forwardPacket = ForwardPacket(
+                        sourceNodeId = android.os.Build.MODEL ?: "unknown-node",
+                        destinationNodeId = null, // internet-bound
+                        ttl = 8,
+                        payload = rawPacket
+                    )
+
+                    packetForwarder?.send(forwardPacket)
+                        ?: Log.w(TAG, "PacketForwarder not attached yet")
+
                 } catch (e: Exception) {
-                    Log.e(TAG, "TUN read error: ${e.message}")
+                    Log.e(TAG, "TUN read error", e)
                     break
                 }
             }
         }
     }
 
+    /* ---------------- Mesh → TUN ---------------- */
+
     fun writeToTun(packet: ByteArray) {
         try {
             tunOutput?.write(packet)
         } catch (e: Exception) {
-            Log.e(TAG, "TUN write error: ${e.message}")
+            Log.e(TAG, "TUN write error", e)
         }
     }
+
+    /* ---------------- Wiring ---------------- */
 
     fun attachPacketForwarder(forwarder: PacketForwarder) {
         packetForwarder = forwarder
