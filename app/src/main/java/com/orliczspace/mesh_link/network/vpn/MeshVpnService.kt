@@ -8,9 +8,12 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.orliczspace.mesh_link.network.ForwardPacket
 import com.orliczspace.mesh_link.network.PacketForwarder
+import com.orliczspace.mesh_link.network.gateway.NatEntry
+import com.orliczspace.mesh_link.network.gateway.IpUdpPacketBuilder
 import kotlinx.coroutines.*
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.net.InetAddress
 
 class MeshVpnService : VpnService() {
 
@@ -38,11 +41,7 @@ class MeshVpnService : VpnService() {
 
     /* ---------------- Lifecycle ---------------- */
 
-    override fun onStartCommand(
-        intent: Intent?,
-        flags: Int,
-        startId: Int
-    ): Int {
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (tunInterface == null) {
             setupVpn()
             startTunReader()
@@ -53,11 +52,9 @@ class MeshVpnService : VpnService() {
     override fun onDestroy() {
         super.onDestroy()
         scope.cancel()
-
         tunInput?.close()
         tunOutput?.close()
         tunInterface?.close()
-
         tunInput = null
         tunOutput = null
         tunInterface = null
@@ -78,11 +75,10 @@ class MeshVpnService : VpnService() {
         val fd = tunInterface!!.fileDescriptor
         tunInput = FileInputStream(fd)
         tunOutput = FileOutputStream(fd)
-
         Log.d(TAG, "VPN interface established")
     }
 
-    /* ---------------- TUN IO ---------------- */
+    /* ---------------- TUN → Mesh ---------------- */
 
     private fun startTunReader() {
         scope.launch {
@@ -95,6 +91,8 @@ class MeshVpnService : VpnService() {
 
                     val rawPacket = buffer.copyOf(len)
 
+                    // Parse IPv4 header to handle NAT & UDP
+                    val natEntry = NatEntry.createFromIpPacket(rawPacket)
                     val forwardPacket = ForwardPacket(
                         sourceNodeId = android.os.Build.MODEL ?: "unknown-node",
                         destinationNodeId = null, // internet-bound
@@ -117,7 +115,16 @@ class MeshVpnService : VpnService() {
 
     fun writeToTun(packet: ByteArray) {
         try {
-            tunOutput?.write(packet)
+            // Rebuild the response packet if it comes from NAT
+            if (packet.size >= 20) { // basic IPv4 header size check
+                val rebuilt = IpUdpPacketBuilder.buildResponse(
+                    NatEntry.createFromIpPacket(packet),
+                    packet
+                )
+                tunOutput?.write(rebuilt)
+            } else {
+                tunOutput?.write(packet)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "TUN write error", e)
         }
