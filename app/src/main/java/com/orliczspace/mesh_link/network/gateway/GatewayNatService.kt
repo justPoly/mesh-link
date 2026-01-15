@@ -13,10 +13,6 @@ class GatewayNatService(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val socket = DatagramSocket()
 
-    /**
-     * Handles an outbound raw IP packet coming from the mesh gateway.
-     * This sends it to the real internet and waits for a response.
-     */
     fun handleOutbound(rawIpPacket: ByteArray) {
         val natEntry = NatEntry.createFromIpPacket(rawIpPacket)
 
@@ -35,13 +31,12 @@ class GatewayNatService(
                 val response = DatagramPacket(buffer, buffer.size)
                 socket.receive(response)
 
-                onInboundPacket(
-                    natEntry,
-                    response.data.copyOf(response.length)
-                )
+                val responsePayload = response.data.copyOf(response.length)
+
+                onInboundPacket(natEntry, responsePayload)
 
             } catch (e: Exception) {
-                Log.e("GatewayNatService", "NAT handling failed", e)
+                Log.e("GatewayNatService", "NAT error", e)
             }
         }
     }
