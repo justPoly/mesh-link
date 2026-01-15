@@ -7,22 +7,22 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 
 class GatewayNatService(
-    private val onInboundPacket: (NatEntry, ByteArray) -> Unit
+    private val onInboundPacket: (ByteArray) -> Unit
 ) {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val socket = DatagramSocket()
 
     fun handleOutbound(rawIpPacket: ByteArray) {
-        val natEntry = NatEntry.createFromIpPacket(rawIpPacket)
+        val nat = NatEntry.createFromIpPacket(rawIpPacket)
 
         scope.launch {
             try {
                 val outgoing = DatagramPacket(
-                    natEntry.payload,
-                    natEntry.payload.size,
-                    InetAddress.getByName(natEntry.destIp),
-                    natEntry.destPort
+                    nat.payload,
+                    nat.payload.size,
+                    InetAddress.getByName(nat.destIp),
+                    nat.destPort
                 )
 
                 socket.send(outgoing)
@@ -31,9 +31,16 @@ class GatewayNatService(
                 val response = DatagramPacket(buffer, buffer.size)
                 socket.receive(response)
 
-                val responsePayload = response.data.copyOf(response.length)
+                val responsePayload =
+                    response.data.copyOf(response.length)
 
-                onInboundPacket(natEntry, responsePayload)
+                val rebuiltPacket =
+                    IpUdpPacketBuilder.buildResponse(
+                        nat,
+                        responsePayload
+                    )
+
+                onInboundPacket(rebuiltPacket)
 
             } catch (e: Exception) {
                 Log.e("GatewayNatService", "NAT error", e)
