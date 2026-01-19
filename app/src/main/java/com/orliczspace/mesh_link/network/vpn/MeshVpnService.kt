@@ -65,8 +65,8 @@ class MeshVpnService : VpnService() {
     private fun setupVpn() {
         val builder = Builder()
             .setSession("MeshLink VPN")
-            .addAddress("10.0.0.2", 24)
-            .addRoute("0.0.0.0", 0)
+            .addAddress("10.0.0.2", 32)
+            .addRoute("10.0.0.0", 8)
             .setBlocking(true)
 
         tunInterface = builder.establish()

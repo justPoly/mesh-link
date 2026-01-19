@@ -86,11 +86,14 @@ class MainActivity : ComponentActivity() {
 
         /* ---------------- Permissions & VPN ---------------- */
         setContent {
-            var hasPermissions by remember { mutableStateOf(checkRequiredPermissions()) }
+
+            var hasPermissions by remember {
+                mutableStateOf(checkRequiredPermissions())
+            }
 
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions()
-            ) { results ->
+            ) {
                 hasPermissions = checkRequiredPermissions()
             }
 
@@ -101,13 +104,43 @@ class MainActivity : ComponentActivity() {
             }
 
             LaunchedEffect(hasPermissions) {
-                if (hasPermissions) startMeshVpn()
+                if (hasPermissions) {
+                    startMeshVpn()
+                    startNeighbourDiscovery()
+                }
+            }
+
+            val isConnected by internetMonitor.isConnected
+            val connectionType by internetMonitor.connectionType
+
+            val discoveredPeers by remember {
+                derivedStateOf {
+                    neighbourService?.discoveredPeers ?: emptyList()
+                }
+            }
+
+            val routingStates by remember {
+                derivedStateOf {
+                    routingRepository.routingTable.values.toList()
+                }
             }
 
             MeshlinkTheme {
-                // Your UI composables here (Dashboard, etc.)
+                if (hasPermissions) {
+                    Dashboard(
+                        internetAvailable = isConnected,
+                        connectionType = connectionType,
+                        neighbours = discoveredPeers,
+                        routingStates = routingStates
+                    )
+                } else {
+                    PermissionRequiredScreen {
+                        permissionLauncher.launch(getRequiredPermissions())
+                    }
+                }
             }
         }
+
 
         /* ---------------- Discovery ---------------- */
         if (checkRequiredPermissions()) {
