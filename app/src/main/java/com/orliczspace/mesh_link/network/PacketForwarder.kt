@@ -2,6 +2,7 @@ package com.orliczspace.mesh_link.network
 
 import android.util.Log
 import com.orliczspace.mesh_link.network.gateway.GatewayNatService
+import com.orliczspace.mesh_link.network.gateway.NatEntry
 import kotlinx.coroutines.*
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -76,7 +77,8 @@ class PacketForwarder(
         if (forwardPacket.destinationNodeId == null &&
             route != null && !route.viaGateway
         ) {
-            gatewayNatService.handleOutbound(forwardPacket.payload)
+            // Pass the originating node ID for NAT tracking
+            gatewayNatService.handleOutbound(forwardPacket.payload, sourceNodeId = forwardPacket.sourceNodeId)
             return
         }
 

@@ -5,15 +5,30 @@ import kotlinx.coroutines.*
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.util.concurrent.ConcurrentHashMap
+
+data class NatKey(val srcIp: String, val srcPort: Int, val destIp: String, val destPort: Int)
 
 class GatewayNatService(
     private val onInboundPacket: (ByteArray) -> Unit
 ) {
+
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val socket = DatagramSocket()
 
-    fun handleOutbound(rawIpPacket: ByteArray) {
+    // NAT table maps destination (external) to the original mesh sender
+    private val natTable = ConcurrentHashMap<NatKey, String>() // NatKey -> sourceNodeId
+
+    /**
+     * Handles outbound packet from mesh toward internet.
+     * Tracks the source node in NAT table for correct response routing.
+     */
+    fun handleOutbound(rawIpPacket: ByteArray, sourceNodeId: String) {
         val natEntry = NatEntry.createFromIpPacket(rawIpPacket)
+
+        // Save mapping in NAT table
+        val key = NatKey(natEntry.srcIp, natEntry.srcPort, natEntry.destIp, natEntry.destPort)
+        natTable[key] = sourceNodeId
 
         scope.launch {
             try {
@@ -32,12 +47,23 @@ class GatewayNatService(
                 socket.receive(response)
                 val responsePayload = response.data.copyOf(response.length)
 
-                // rebuild packet for return to VPN/mesh
-                val rebuiltPacket = IpUdpPacketBuilder.buildResponse(
-                    natEntry,
-                    responsePayload
+                // lookup original sender from NAT table
+                val reverseKey = NatKey(
+                    srcIp = natEntry.destIp,
+                    srcPort = natEntry.destPort,
+                    destIp = natEntry.srcIp,
+                    destPort = natEntry.srcPort
                 )
-                onInboundPacket(rebuiltPacket)
+                val originalNode = natTable.remove(reverseKey) // remove after use
+
+                if (originalNode != null) {
+                    // rebuild packet to send back to mesh/VPN
+                    val rebuiltPacket = IpUdpPacketBuilder.buildResponse(natEntry, responsePayload)
+                    onInboundPacket(rebuiltPacket)
+                    Log.d("GatewayNatService", "Inbound packet delivered to $originalNode")
+                } else {
+                    Log.w("GatewayNatService", "No NAT entry for response packet")
+                }
             } catch (e: Exception) {
                 Log.e("GatewayNatService", "NAT error", e)
             }

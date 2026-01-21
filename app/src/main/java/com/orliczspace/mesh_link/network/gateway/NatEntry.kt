@@ -5,10 +5,11 @@ data class NatEntry(
     val srcPort: Int,
     val destIp: String,
     val destPort: Int,
-    val payload: ByteArray
+    val payload: ByteArray,
+    val sourceNodeId: String? = null // NEW: track originating node
 ) {
     companion object {
-        fun createFromIpPacket(raw: ByteArray): NatEntry {
+        fun createFromIpPacket(raw: ByteArray, sourceNodeId: String? = null): NatEntry {
             val ip = IPv4Packet.parse(raw)
             if (ip.protocol != 17) throw IllegalArgumentException("Only UDP supported")
             val udp = UDPPacket.parse(ip.payload)
@@ -17,7 +18,8 @@ data class NatEntry(
                 srcPort = udp.srcPort,
                 destIp = ip.dstIp,
                 destPort = udp.dstPort,
-                payload = udp.payload
+                payload = udp.payload,
+                sourceNodeId = sourceNodeId
             )
         }
     }
