@@ -1,4 +1,5 @@
 package com.orliczspace.mesh_link
+
 import android.os.IBinder
 import android.Manifest
 import android.content.*
@@ -21,12 +22,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import com.google.accompanist.systemuicontroller.rememberSystemUiController
 import com.orliczspace.mesh_link.network.*
+import com.orliczspace.mesh_link.network.gateway.NatEntry
 import com.orliczspace.mesh_link.network.vpn.MeshVpnService
 import com.orliczspace.mesh_link.ui.theme.MeshlinkTheme
+import kotlinx.coroutines.delay
 import java.net.InetAddress
-
 
 class MainActivity : ComponentActivity() {
 
@@ -78,7 +79,6 @@ class MainActivity : ComponentActivity() {
             linkProbeService = linkProbeService,
             deliveryListener = object : PacketForwarder.PacketDeliveryListener {
                 override fun onPacketDelivered(payload: ByteArray) {
-                    // Inbound packets go to TUN
                     meshVpnService?.writeToTun(payload)
                 }
             }
@@ -86,10 +86,7 @@ class MainActivity : ComponentActivity() {
 
         /* ---------------- Permissions & VPN ---------------- */
         setContent {
-
-            var hasPermissions by remember {
-                mutableStateOf(checkRequiredPermissions())
-            }
+            var hasPermissions by remember { mutableStateOf(checkRequiredPermissions()) }
 
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions()
@@ -98,9 +95,7 @@ class MainActivity : ComponentActivity() {
             }
 
             LaunchedEffect(Unit) {
-                if (!hasPermissions) {
-                    permissionLauncher.launch(getRequiredPermissions())
-                }
+                if (!hasPermissions) permissionLauncher.launch(getRequiredPermissions())
             }
 
             LaunchedEffect(hasPermissions) {
@@ -114,14 +109,25 @@ class MainActivity : ComponentActivity() {
             val connectionType by internetMonitor.connectionType
 
             val discoveredPeers by remember {
-                derivedStateOf {
-                    neighbourService?.discoveredPeers ?: emptyList()
-                }
+                derivedStateOf { neighbourService?.discoveredPeers ?: emptyList() }
             }
 
             val routingStates by remember {
-                derivedStateOf {
-                    routingRepository.routingTable.values.toList()
+                derivedStateOf { routingRepository.routingTable.values.toList() }
+            }
+
+            // 🔹 Active internet flows (now using NatEntry)
+            val activeFlows = remember { mutableStateListOf<String>() }
+
+            LaunchedEffect(Unit) {
+                while (true) {
+                    activeFlows.clear()
+                    activeFlows.addAll(
+                        packetForwarder.getActiveInternetFlows()
+                            .keys
+                            .filterNotNull() // 🔹 only non-null keys
+                    )
+                    delay(1000)
                 }
             }
 
@@ -131,7 +137,8 @@ class MainActivity : ComponentActivity() {
                         internetAvailable = isConnected,
                         connectionType = connectionType,
                         neighbours = discoveredPeers,
-                        routingStates = routingStates
+                        routingStates = routingStates,
+                        activeFlows = activeFlows
                     )
                 } else {
                     PermissionRequiredScreen {
@@ -140,7 +147,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-
 
         /* ---------------- Discovery ---------------- */
         if (checkRequiredPermissions()) {
@@ -152,7 +158,6 @@ class MainActivity : ComponentActivity() {
         neighbourService = NeighbourDiscoveryService(this)
         neighbourService?.startDiscovery()
 
-        // Update routing and probe scheduler
         neighbourService?.connectedPeers?.forEach { (nodeId, ip) ->
             routingRepository.updateNode(nodeId, hasInternetAccess = false)
             adaptiveProbeScheduler.startProbing(nodeId, InetAddress.getByName(ip))
@@ -160,13 +165,11 @@ class MainActivity : ComponentActivity() {
     }
 
     /* ---------------- VPN helpers ---------------- */
+
     private fun startMeshVpn() {
         val intent = VpnService.prepare(this)
-        if (intent != null) {
-            startActivityForResult(intent, VPN_REQUEST_CODE)
-        } else {
-            startVpnService()
-        }
+        if (intent != null) startActivityForResult(intent, VPN_REQUEST_CODE)
+        else startVpnService()
     }
 
     private fun startVpnService() {
@@ -177,40 +180,25 @@ class MainActivity : ComponentActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == VPN_REQUEST_CODE && resultCode == RESULT_OK) {
-            startVpnService()
-        }
+        if (requestCode == VPN_REQUEST_CODE && resultCode == RESULT_OK) startVpnService()
     }
 
     /* ---------------- Permissions helpers ---------------- */
+
     private fun checkRequiredPermissions(): Boolean {
-        val fineLocation = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-
-        val coarseLocation = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-
-        val nearbyDevices =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                ContextCompat.checkSelfPermission(
-                    this, Manifest.permission.NEARBY_WIFI_DEVICES
-                ) == PackageManager.PERMISSION_GRANTED
-            } else true
-
-        return fineLocation && coarseLocation && nearbyDevices
+        val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val nearby =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED
+            else true
+        return fine && coarse && nearby
     }
 
     private fun getRequiredPermissions(): Array<String> {
-        val permissions = mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
-        }
-        return permissions.toTypedArray()
+        val perms = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) perms.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        return perms.toTypedArray()
     }
 
     override fun onDestroy() {
@@ -230,7 +218,8 @@ fun Dashboard(
     internetAvailable: Boolean,
     connectionType: String,
     neighbours: List<String>,
-    routingStates: List<RoutingState>
+    routingStates: List<RoutingState>,
+    activeFlows: List<String> = emptyList() // new parameter
 ) {
     val statusText = if (internetAvailable) "Online" else "Offline"
     val statusColor =
@@ -310,9 +299,27 @@ fun Dashboard(
                     }
                 }
             }
+
+            Spacer(Modifier.height(28.dp))
+
+            SectionCard(title = "Active Internet Flows") { // NEW
+                if (activeFlows.isEmpty()) {
+                    EmptyState("No nodes currently using internet")
+                } else {
+                    activeFlows.forEach { node ->
+                        AnimatedVisibility(
+                            visible = true,
+                            enter = fadeIn() + expandVertically()
+                        ) {
+                            ListRow(node)
+                        }
+                    }
+                }
+            }
         }
     }
 }
+
 
 /* ---------------- UI helpers ---------------- */
 

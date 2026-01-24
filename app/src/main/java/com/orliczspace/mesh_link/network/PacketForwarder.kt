@@ -21,7 +21,6 @@ class PacketForwarder(
 
     // NAT service handles outbound packets and reconstructs return packets
     private val gatewayNatService = GatewayNatService { inboundPacket: ByteArray ->
-        // Any packet returned from NAT goes to VPN
         deliveryListener.onPacketDelivered(inboundPacket)
     }
 
@@ -44,7 +43,7 @@ class PacketForwarder(
 
     private fun listen() {
         scope.launch {
-            val buffer = ByteArray(65535) // max IP packet size
+            val buffer = ByteArray(65535)
             while (isActive) {
                 try {
                     val packet = DatagramPacket(buffer, buffer.size)
@@ -77,8 +76,7 @@ class PacketForwarder(
         if (forwardPacket.destinationNodeId == null &&
             route != null && !route.viaGateway
         ) {
-            // Pass the originating node ID for NAT tracking
-            gatewayNatService.handleOutbound(forwardPacket.payload, sourceNodeId = forwardPacket.sourceNodeId)
+            gatewayNatService.handleOutbound(forwardPacket.payload, forwardPacket.sourceNodeId)
             return
         }
 
@@ -91,13 +89,14 @@ class PacketForwarder(
     fun forwardRawIpPacket(rawPacket: ByteArray) {
         val forwardPacket = ForwardPacket(
             sourceNodeId = localNodeId,
-            destinationNodeId = null, // internet-bound
+            destinationNodeId = null,
             ttl = 8,
             payload = rawPacket
         )
         forward(forwardPacket)
     }
 
+    // 🔹 Make send() publicly callable
     fun send(packet: ForwardPacket) {
         forward(packet)
     }
@@ -144,6 +143,11 @@ class PacketForwarder(
             "Packet delivered from ${packet.sourceNodeId} (${packet.payload.size} bytes)"
         )
         deliveryListener.onPacketDelivered(packet.payload)
+    }
+
+    // 🔹 Return Map<String, NatEntry> for active internet flows
+    fun getActiveInternetFlows(): Map<String, NatEntry> {
+        return gatewayNatService.getActiveFlows()
     }
 
     /* ---------------- CALLBACK ---------------- */

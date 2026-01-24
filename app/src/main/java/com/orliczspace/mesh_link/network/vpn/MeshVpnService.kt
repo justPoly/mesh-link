@@ -8,12 +8,11 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.orliczspace.mesh_link.network.ForwardPacket
 import com.orliczspace.mesh_link.network.PacketForwarder
-import com.orliczspace.mesh_link.network.gateway.NatEntry
 import com.orliczspace.mesh_link.network.gateway.IpUdpPacketBuilder
+import com.orliczspace.mesh_link.network.gateway.NatEntry
 import kotlinx.coroutines.*
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.net.InetAddress
 
 class MeshVpnService : VpnService() {
 
@@ -29,17 +28,12 @@ class MeshVpnService : VpnService() {
 
     private var packetForwarder: PacketForwarder? = null
 
-    /* ---------------- Binder ---------------- */
-
     inner class LocalBinder : Binder() {
         fun getService(): MeshVpnService = this@MeshVpnService
     }
 
     private val binder = LocalBinder()
-
     override fun onBind(intent: Intent?): IBinder = binder
-
-    /* ---------------- Lifecycle ---------------- */
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (tunInterface == null) {
@@ -60,8 +54,6 @@ class MeshVpnService : VpnService() {
         tunInterface = null
     }
 
-    /* ---------------- VPN Setup ---------------- */
-
     private fun setupVpn() {
         val builder = Builder()
             .setSession("MeshLink VPN")
@@ -69,8 +61,7 @@ class MeshVpnService : VpnService() {
             .addRoute("10.0.0.0", 8)
             .setBlocking(true)
 
-        tunInterface = builder.establish()
-            ?: throw IllegalStateException("VPN establish failed")
+        tunInterface = builder.establish() ?: throw IllegalStateException("VPN establish failed")
 
         val fd = tunInterface!!.fileDescriptor
         tunInput = FileInputStream(fd)
@@ -78,12 +69,9 @@ class MeshVpnService : VpnService() {
         Log.d(TAG, "VPN interface established")
     }
 
-    /* ---------------- TUN → Mesh ---------------- */
-
     private fun startTunReader() {
         scope.launch {
-            val buffer = ByteArray(65535) // max IP packet size
-
+            val buffer = ByteArray(65535)
             while (isActive) {
                 try {
                     val len = tunInput?.read(buffer) ?: break
@@ -91,17 +79,17 @@ class MeshVpnService : VpnService() {
 
                     val rawPacket = buffer.copyOf(len)
 
-                    // Parse IPv4 header to handle NAT & UDP
-                    val natEntry = NatEntry.createFromIpPacket(rawPacket)
                     val forwardPacket = ForwardPacket(
                         sourceNodeId = android.os.Build.MODEL ?: "unknown-node",
-                        destinationNodeId = null, // internet-bound
+                        destinationNodeId = null,
                         ttl = 8,
                         payload = rawPacket
                     )
 
-                    packetForwarder?.send(forwardPacket)
-                        ?: Log.w(TAG, "PacketForwarder not attached yet")
+                    // ✅ Safe call to send
+                    packetForwarder?.let { forwarder ->
+                        forwarder.send(forwardPacket)
+                    } ?: Log.w(TAG, "PacketForwarder not attached yet")
 
                 } catch (e: Exception) {
                     Log.e(TAG, "TUN read error", e)
@@ -111,16 +99,10 @@ class MeshVpnService : VpnService() {
         }
     }
 
-    /* ---------------- Mesh → TUN ---------------- */
-
     fun writeToTun(packet: ByteArray) {
         try {
-            // Rebuild the response packet if it comes from NAT
-            if (packet.size >= 20) { // basic IPv4 header size check
-                val rebuilt = IpUdpPacketBuilder.buildResponse(
-                    NatEntry.createFromIpPacket(packet),
-                    packet
-                )
+            if (packet.size >= 20) {
+                val rebuilt = IpUdpPacketBuilder.buildResponse(NatEntry.createFromIpPacket(packet), packet)
                 tunOutput?.write(rebuilt)
             } else {
                 tunOutput?.write(packet)
@@ -129,8 +111,6 @@ class MeshVpnService : VpnService() {
             Log.e(TAG, "TUN write error", e)
         }
     }
-
-    /* ---------------- Wiring ---------------- */
 
     fun attachPacketForwarder(forwarder: PacketForwarder) {
         packetForwarder = forwarder
