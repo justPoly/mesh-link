@@ -24,9 +24,11 @@ import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.orliczspace.mesh_link.network.*
 import com.orliczspace.mesh_link.network.gateway.NatEntry
+import com.orliczspace.mesh_link.network.gateway.SQLiteFlowLogger
 import com.orliczspace.mesh_link.network.vpn.MeshVpnService
 import com.orliczspace.mesh_link.ui.theme.MeshlinkTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.net.InetAddress
 
 class MainActivity : ComponentActivity() {
@@ -49,10 +51,7 @@ class MainActivity : ComponentActivity() {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             val service = (binder as MeshVpnService.LocalBinder).getService()
             meshVpnService = service
-
-            // Attach PacketForwarder
             meshVpnService?.attachPacketForwarder(packetForwarder)
-
             Log.d("MainActivity", "MeshVpnService connected")
         }
 
@@ -73,10 +72,13 @@ class MainActivity : ComponentActivity() {
         adaptiveProbeScheduler = AdaptiveProbeScheduler(linkProbeService)
         internetMonitor = InternetMonitor(this)
 
+        val flowLogger = SQLiteFlowLogger(this)
+
         packetForwarder = PacketForwarder(
-            localNodeId = Build.MODEL ?: "unknown-node",
+            localNodeId = Build.MODEL ?: "unknown",
             routingRepository = routingRepository,
             linkProbeService = linkProbeService,
+            flowLogger = flowLogger,
             deliveryListener = object : PacketForwarder.PacketDeliveryListener {
                 override fun onPacketDelivered(payload: ByteArray) {
                     meshVpnService?.writeToTun(payload)
@@ -86,13 +88,12 @@ class MainActivity : ComponentActivity() {
 
         /* ---------------- Permissions & VPN ---------------- */
         setContent {
+
             var hasPermissions by remember { mutableStateOf(checkRequiredPermissions()) }
 
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions()
-            ) {
-                hasPermissions = checkRequiredPermissions()
-            }
+            ) { hasPermissions = checkRequiredPermissions() }
 
             LaunchedEffect(Unit) {
                 if (!hasPermissions) permissionLauncher.launch(getRequiredPermissions())
@@ -116,17 +117,14 @@ class MainActivity : ComponentActivity() {
                 derivedStateOf { routingRepository.routingTable.values.toList() }
             }
 
-            // 🔹 Active internet flows (now using NatEntry)
-            val activeFlows = remember { mutableStateListOf<String>() }
+            // 🔹 NEW: active NAT / internet flows
+            val activeFlows = remember { mutableStateListOf<NatEntry>() }
 
             LaunchedEffect(Unit) {
+                val scope = this
                 while (true) {
                     activeFlows.clear()
-                    activeFlows.addAll(
-                        packetForwarder.getActiveInternetFlows()
-                            .keys
-                            .filterNotNull() // 🔹 only non-null keys
-                    )
+                    activeFlows.addAll(packetForwarder.getActiveInternetFlows().values)
                     delay(1000)
                 }
             }
@@ -141,17 +139,13 @@ class MainActivity : ComponentActivity() {
                         activeFlows = activeFlows
                     )
                 } else {
-                    PermissionRequiredScreen {
-                        permissionLauncher.launch(getRequiredPermissions())
-                    }
+                    PermissionRequiredScreen { permissionLauncher.launch(getRequiredPermissions()) }
                 }
             }
         }
 
         /* ---------------- Discovery ---------------- */
-        if (checkRequiredPermissions()) {
-            startNeighbourDiscovery()
-        }
+        if (checkRequiredPermissions()) startNeighbourDiscovery()
     }
 
     private fun startNeighbourDiscovery() {
@@ -165,7 +159,6 @@ class MainActivity : ComponentActivity() {
     }
 
     /* ---------------- VPN helpers ---------------- */
-
     private fun startMeshVpn() {
         val intent = VpnService.prepare(this)
         if (intent != null) startActivityForResult(intent, VPN_REQUEST_CODE)
@@ -184,21 +177,22 @@ class MainActivity : ComponentActivity() {
     }
 
     /* ---------------- Permissions helpers ---------------- */
-
     private fun checkRequiredPermissions(): Boolean {
-        val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val nearby =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-                ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED
-            else true
-        return fine && coarse && nearby
+        val fineLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        val coarseLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        val nearbyDevices = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) ==
+                    PackageManager.PERMISSION_GRANTED
+        } else true
+        return fineLocation && coarseLocation && nearbyDevices
     }
 
     private fun getRequiredPermissions(): Array<String> {
-        val perms = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) perms.add(Manifest.permission.NEARBY_WIFI_DEVICES)
-        return perms.toTypedArray()
+        val permissions = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        return permissions.toTypedArray()
     }
 
     override fun onDestroy() {
@@ -211,6 +205,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+
 /* ---------------- UI COMPOSABLES ---------------- */
 
 @Composable
@@ -219,17 +214,12 @@ fun Dashboard(
     connectionType: String,
     neighbours: List<String>,
     routingStates: List<RoutingState>,
-    activeFlows: List<String> = emptyList() // new parameter
+    activeFlows: List<NatEntry> = emptyList() // Now List<NatEntry>
 ) {
     val statusText = if (internetAvailable) "Online" else "Offline"
-    val statusColor =
-        if (internetAvailable) MaterialTheme.colorScheme.primary
-        else MaterialTheme.colorScheme.error
+    val statusColor = if (internetAvailable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -239,26 +229,13 @@ fun Dashboard(
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
-
-                    Text(
-                        text = "MeshLink",
-                        style = MaterialTheme.typography.headlineMedium
-                    )
-
+                    Text("MeshLink", style = MaterialTheme.typography.headlineMedium)
                     Spacer(Modifier.height(6.dp))
-
-                    Text(
-                        text = "Decentralized mobile mesh network",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-
+                    Text("Decentralized mobile mesh network", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(16.dp))
-
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         StatusChip(statusText, statusColor)
                         StatusChip(connectionType, MaterialTheme.colorScheme.secondary)
@@ -269,16 +246,10 @@ fun Dashboard(
             Spacer(Modifier.height(28.dp))
 
             SectionCard(title = "Nearby Nodes") {
-                if (neighbours.isEmpty()) {
-                    EmptyState("No nearby nodes found")
-                } else {
-                    neighbours.forEach { node ->
-                        AnimatedVisibility(
-                            visible = true,
-                            enter = fadeIn() + expandVertically()
-                        ) {
-                            ListRow(node)
-                        }
+                if (neighbours.isEmpty()) EmptyState("No nearby nodes found")
+                else neighbours.forEach { node ->
+                    AnimatedVisibility(visible = true, enter = fadeIn() + expandVertically()) {
+                        ListRow(node)
                     }
                 }
             }
@@ -286,33 +257,21 @@ fun Dashboard(
             Spacer(Modifier.height(28.dp))
 
             SectionCard(title = "Routing State") {
-                if (routingStates.isEmpty()) {
-                    EmptyState("No routing data available")
-                } else {
-                    routingStates.forEach { state ->
-                        AnimatedVisibility(
-                            visible = true,
-                            enter = fadeIn() + expandVertically()
-                        ) {
-                            RoutingStateCard(state)
-                        }
+                if (routingStates.isEmpty()) EmptyState("No routing data available")
+                else routingStates.forEach { state ->
+                    AnimatedVisibility(visible = true, enter = fadeIn() + expandVertically()) {
+                        RoutingStateCard(state)
                     }
                 }
             }
 
             Spacer(Modifier.height(28.dp))
 
-            SectionCard(title = "Active Internet Flows") { // NEW
-                if (activeFlows.isEmpty()) {
-                    EmptyState("No nodes currently using internet")
-                } else {
-                    activeFlows.forEach { node ->
-                        AnimatedVisibility(
-                            visible = true,
-                            enter = fadeIn() + expandVertically()
-                        ) {
-                            ListRow(node)
-                        }
+            SectionCard(title = "Active Internet Flows") {
+                if (activeFlows.isEmpty()) EmptyState("No nodes currently using internet")
+                else activeFlows.forEach { entry ->
+                    AnimatedVisibility(visible = true, enter = fadeIn() + expandVertically()) {
+                        ListRow("${entry.sourceNodeId} → ${entry.destIp}:${entry.destPort}")
                     }
                 }
             }
@@ -320,28 +279,17 @@ fun Dashboard(
     }
 }
 
-
 /* ---------------- UI helpers ---------------- */
 
 @Composable
 fun StatusChip(label: String, color: androidx.compose.ui.graphics.Color) {
-    Surface(
-        shape = MaterialTheme.shapes.large,
-        color = color.copy(alpha = 0.12f)
-    ) {
-        Text(
-            text = label,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-            color = color
-        )
+    Surface(shape = MaterialTheme.shapes.large, color = color.copy(alpha = 0.12f)) {
+        Text(text = label, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), color = color)
     }
 }
 
 @Composable
-fun SectionCard(
-    title: String,
-    content: @Composable ColumnScope.() -> Unit
-) {
+fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(18.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
@@ -367,12 +315,8 @@ fun ListRow(title: String) {
 @Composable
 fun RoutingStateCard(state: RoutingState) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(state.nodeId, style = MaterialTheme.typography.bodyLarge)
@@ -386,19 +330,12 @@ fun RoutingStateCard(state: RoutingState) {
 @Composable
 fun PermissionRequiredScreen(onRequestPermission: () -> Unit) {
     Surface(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier.padding(32.dp),
-            verticalArrangement = Arrangement.Center
-        ) {
+        Column(modifier = Modifier.padding(32.dp), verticalArrangement = Arrangement.Center) {
             Text("Permission Required", style = MaterialTheme.typography.headlineMedium)
             Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                "MeshLink needs location and nearby devices permission to discover nearby phones."
-            )
+            Text("MeshLink needs location and nearby devices permission to discover nearby phones.")
             Spacer(modifier = Modifier.height(32.dp))
-            Button(onClick = onRequestPermission) {
-                Text("Grant Permission")
-            }
+            Button(onClick = onRequestPermission) { Text("Grant Permission") }
         }
     }
 }

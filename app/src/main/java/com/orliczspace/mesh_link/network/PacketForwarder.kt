@@ -1,8 +1,10 @@
 package com.orliczspace.mesh_link.network
 
 import android.util.Log
+import com.orliczspace.mesh_link.network.gateway.FlowLogger
 import com.orliczspace.mesh_link.network.gateway.GatewayNatService
 import com.orliczspace.mesh_link.network.gateway.NatEntry
+
 import kotlinx.coroutines.*
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -13,16 +15,20 @@ class PacketForwarder(
     private val routingRepository: RoutingStateRepository,
     private val linkProbeService: LinkProbeService,
     private val listenPort: Int = 9999,
+    flowLogger: FlowLogger,
     private val deliveryListener: PacketDeliveryListener
 ) {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var socket: DatagramSocket? = null
 
-    // NAT service handles outbound packets and reconstructs return packets
-    private val gatewayNatService = GatewayNatService { inboundPacket: ByteArray ->
-        deliveryListener.onPacketDelivered(inboundPacket)
-    }
+    // NAT service (NO Context required)
+    private val gatewayNatService = GatewayNatService(
+        flowLogger = flowLogger,
+        onInboundPacket = { payload ->
+            deliveryListener.onPacketDelivered(payload)
+        }
+    )
 
     /* ---------------- LIFECYCLE ---------------- */
 
@@ -50,7 +56,9 @@ class PacketForwarder(
                     socket?.receive(packet)
                     handlePacket(packet)
                 } catch (e: Exception) {
-                    if (isActive) Log.e("PacketForwarder", "Receive error: ${e.message}")
+                    if (isActive) {
+                        Log.e("PacketForwarder", "Receive error", e)
+                    }
                 }
             }
         }
@@ -64,45 +72,50 @@ class PacketForwarder(
             return
         }
 
+        // Packet meant for this node
+        if (forwardPacket.destinationNodeId == localNodeId) {
+            deliver(forwardPacket)
+            return
+        }
+
         val route = routingRepository.getRouteToInternet(localNodeId)
 
-        // Packet destined to this node
-        if (forwardPacket.destinationNodeId == localNodeId) {
-            onPacketDelivered(forwardPacket)
-            return
-        }
-
-        // Internet-bound packet and this node is gateway
-        if (forwardPacket.destinationNodeId == null &&
-            route != null && !route.viaGateway
+        // Internet-bound packet AND this node is gateway
+        if (
+            forwardPacket.destinationNodeId == null &&
+            route != null &&
+            !route.viaGateway
         ) {
-            gatewayNatService.handleOutbound(forwardPacket.payload, forwardPacket.sourceNodeId)
+            gatewayNatService.handleOutbound(
+                rawIpPacket = forwardPacket.payload,
+                sourceNodeId = forwardPacket.sourceNodeId
+            )
             return
         }
 
-        // Forward to next hop in mesh
+        // Forward within mesh
         forward(forwardPacket)
     }
 
-    /* ---------------- FORWARD ---------------- */
+    /* ---------------- SEND / FORWARD ---------------- */
+
+    fun send(packet: ForwardPacket) {
+        forward(packet)
+    }
 
     fun forwardRawIpPacket(rawPacket: ByteArray) {
-        val forwardPacket = ForwardPacket(
+        val packet = ForwardPacket(
             sourceNodeId = localNodeId,
             destinationNodeId = null,
             ttl = 8,
             payload = rawPacket
         )
-        forward(forwardPacket)
-    }
-
-    // 🔹 Make send() publicly callable
-    fun send(packet: ForwardPacket) {
         forward(packet)
     }
 
     private fun forward(packet: ForwardPacket) {
         val route = routingRepository.getRouteToInternet(localNodeId)
+
         if (route == null) {
             Log.d("PacketForwarder", "No route available, dropping packet")
             return
@@ -110,15 +123,12 @@ class PacketForwarder(
 
         // Deliver locally if this node is the gateway
         if (!route.viaGateway) {
-            onPacketDelivered(packet)
+            deliver(packet)
             return
         }
 
         val nextHopNodeId = route.nextHopNodeId ?: return
-        val nextHopIp = linkProbeService.getKnownPeers()[nextHopNodeId] ?: run {
-            Log.d("PacketForwarder", "Next hop IP unknown for $nextHopNodeId")
-            return
-        }
+        val nextHopIp = linkProbeService.getKnownPeers()[nextHopNodeId] ?: return
 
         val forwardedPacket = packet.copy(ttl = packet.ttl - 1)
         val data = ForwardPacketCodec.encode(forwardedPacket)
@@ -126,29 +136,41 @@ class PacketForwarder(
         scope.launch {
             try {
                 socket?.send(
-                    DatagramPacket(data, data.size, InetAddress.getByName(nextHopIp), listenPort)
+                    DatagramPacket(
+                        data,
+                        data.size,
+                        InetAddress.getByName(nextHopIp),
+                        listenPort
+                    )
                 )
-                Log.d("PacketForwarder", "Forwarded packet to $nextHopNodeId @ $nextHopIp")
+                Log.d(
+                    "PacketForwarder",
+                    "Forwarded packet to $nextHopNodeId @ $nextHopIp"
+                )
             } catch (e: Exception) {
-                Log.e("PacketForwarder", "Forward error: ${e.message}")
+                Log.e("PacketForwarder", "Forward error", e)
             }
         }
     }
 
     /* ---------------- DELIVERY ---------------- */
 
-    private fun onPacketDelivered(packet: ForwardPacket) {
+    private fun deliver(packet: ForwardPacket) {
         Log.d(
             "PacketForwarder",
-            "Packet delivered from ${packet.sourceNodeId} (${packet.payload.size} bytes)"
+            "Delivered packet from ${packet.sourceNodeId} (${packet.payload.size} bytes)"
         )
         deliveryListener.onPacketDelivered(packet.payload)
     }
 
-    // 🔹 Return Map<String, NatEntry> for active internet flows
+    /* ---------------- NAT / FLOW VISIBILITY ---------------- */
+
+
+
     fun getActiveInternetFlows(): Map<String, NatEntry> {
         return gatewayNatService.getActiveFlows()
     }
+
 
     /* ---------------- CALLBACK ---------------- */
 
