@@ -3,6 +3,7 @@ package com.orliczspace.mesh_link.network
 import android.util.Log
 import com.orliczspace.mesh_link.network.gateway.FlowLogger
 import com.orliczspace.mesh_link.network.gateway.GatewayNatService
+import com.orliczspace.mesh_link.network.gateway.IFlowLogger
 import com.orliczspace.mesh_link.network.gateway.NatEntry
 import kotlinx.coroutines.*
 import java.net.DatagramPacket
@@ -14,7 +15,7 @@ class PacketForwarder(
     private val routingRepository: RoutingStateRepository,
     private val linkProbeService: LinkProbeService,
     private val listenPort: Int = 9999,
-    flowLogger: FlowLogger,
+    flowLogger: IFlowLogger,  // <- interface type
     private val deliveryListener: PacketDeliveryListener
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
