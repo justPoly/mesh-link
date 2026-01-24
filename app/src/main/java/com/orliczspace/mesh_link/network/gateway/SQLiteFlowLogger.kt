@@ -9,11 +9,14 @@ class SQLiteFlowLogger(context: Context) : IFlowLogger {
 
     override fun logOutboundFlow(nodeId: String, entry: NatEntry) {
         dbHelper.insertFlow(nodeId, entry)
-        Log.d("SQLiteFlowLogger", "Outbound flow persisted for node $nodeId: ${entry.destIp}:${entry.destPort}")
+        Log.d(
+            "SQLiteFlowLogger",
+            "Flow started: ${entry.srcIp}:${entry.srcPort} → ${entry.destIp}:${entry.destPort}"
+        )
     }
 
     override fun markFlowEnded(nodeId: String) {
-        // Optional: mark flows as ended (could add a column like 'ended_timestamp')
-        Log.d("SQLiteFlowLogger", "Flow ended persisted for node $nodeId")
+        dbHelper.markFlowEnded(nodeId)
+        Log.d("SQLiteFlowLogger", "Flow ended for node $nodeId")
     }
 }
