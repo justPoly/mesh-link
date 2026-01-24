@@ -9,56 +9,50 @@ class FlowLogDbHelper(context: Context) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
     companion object {
-        private const val DATABASE_NAME = "mesh_flows.db"
+        private const val DATABASE_NAME = "flow_logs.db"
         private const val DATABASE_VERSION = 1
-        const val TABLE_NAME = "flow_logs"
-        const val COL_ID = "id"
-        const val COL_NODE = "node_id"
-        const val COL_SRC_IP = "src_ip"
-        const val COL_SRC_PORT = "src_port"
-        const val COL_DEST_IP = "dest_ip"
-        const val COL_DEST_PORT = "dest_port"
-        const val COL_TIMESTAMP = "timestamp"
+
+        const val TABLE_FLOWS = "flows"
+        const val COLUMN_ID = "id"
+        const val COLUMN_NODE_ID = "node_id"
+        const val COLUMN_SRC_IP = "src_ip"
+        const val COLUMN_SRC_PORT = "src_port"
+        const val COLUMN_DEST_IP = "dest_ip"
+        const val COLUMN_DEST_PORT = "dest_port"
+        const val COLUMN_TIMESTAMP = "timestamp"
     }
 
     override fun onCreate(db: SQLiteDatabase) {
         val createTable = """
-            CREATE TABLE $TABLE_NAME (
-                $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                $COL_NODE TEXT,
-                $COL_SRC_IP TEXT,
-                $COL_SRC_PORT INTEGER,
-                $COL_DEST_IP TEXT,
-                $COL_DEST_PORT INTEGER,
-                $COL_TIMESTAMP INTEGER
+            CREATE TABLE $TABLE_FLOWS (
+                $COLUMN_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                $COLUMN_NODE_ID TEXT,
+                $COLUMN_SRC_IP TEXT,
+                $COLUMN_SRC_PORT INTEGER,
+                $COLUMN_DEST_IP TEXT,
+                $COLUMN_DEST_PORT INTEGER,
+                $COLUMN_TIMESTAMP INTEGER
             )
         """.trimIndent()
         db.execSQL(createTable)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_NAME")
+        db.execSQL("DROP TABLE IF EXISTS $TABLE_FLOWS")
         onCreate(db)
     }
 
-    fun insertFlow(nodeId: String, natEntry: NatEntry) {
+    /** Insert a new flow log into the database */
+    fun insertFlow(nodeId: String, entry: NatEntry) {
         val db = writableDatabase
         val values = ContentValues().apply {
-            put(COL_NODE, nodeId)
-            put(COL_SRC_IP, natEntry.srcIp)
-            put(COL_SRC_PORT, natEntry.srcPort)
-            put(COL_DEST_IP, natEntry.destIp)
-            put(COL_DEST_PORT, natEntry.destPort)
-            put(COL_TIMESTAMP, System.currentTimeMillis())
+            put(COLUMN_NODE_ID, nodeId)
+            put(COLUMN_SRC_IP, entry.srcIp)
+            put(COLUMN_SRC_PORT, entry.srcPort)
+            put(COLUMN_DEST_IP, entry.destIp)
+            put(COLUMN_DEST_PORT, entry.destPort)
+            put(COLUMN_TIMESTAMP, System.currentTimeMillis())
         }
-        db.insert(TABLE_NAME, null, values)
-    }
-
-    fun markFlowEnded(entry: NatEntry) {
-        val db = writableDatabase
-        db.execSQL(
-            "UPDATE flow_logs SET ended_at = CURRENT_TIMESTAMP WHERE src_ip=? AND src_port=? AND dest_ip=? AND dest_port=?",
-            arrayOf(entry.srcIp, entry.srcPort, entry.destIp, entry.destPort)
-        )
+        db.insert(TABLE_FLOWS, null, values)
     }
 }

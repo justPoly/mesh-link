@@ -7,6 +7,10 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 
+/**
+ * Handles NAT for internet-bound packets in the mesh network.
+ * Tracks active flows and ensures return packets reach the originating node.
+ */
 class GatewayNatService(
     private val flowLogger: FlowLogger,
     private val onInboundPacket: (ByteArray) -> Unit
@@ -14,17 +18,22 @@ class GatewayNatService(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val socket = DatagramSocket()
 
+    // Track active flows: sourceNodeId -> NatEntry
     private val activeFlows = ConcurrentHashMap<String, NatEntry>()
 
-    fun handleOutbound(rawIpPacket: ByteArray, sourceNodeId: String) {
+    /**
+     * Handle outbound internet-bound packet from a mesh node.
+     */
+    fun handleOutbound(rawIpPacket: ByteArray, sourceNodeId: String?) {
         val natEntry = NatEntry.createFromIpPacket(rawIpPacket, sourceNodeId)
-        activeFlows[sourceNodeId] = natEntry
+        val nodeKey = sourceNodeId ?: natEntry.sourceNodeId ?: return
 
-        // 🔥 Hybrid logging begins here
-        flowLogger.onFlowStarted(natEntry)
+        activeFlows[nodeKey] = natEntry
+        flowLogger.logOutboundFlow(nodeKey, natEntry)
 
         scope.launch {
             try {
+                // Send packet to actual destination
                 val outgoing = DatagramPacket(
                     natEntry.payload,
                     natEntry.payload.size,
@@ -33,30 +42,32 @@ class GatewayNatService(
                 )
                 socket.send(outgoing)
 
+                // Wait for response
                 val buffer = ByteArray(65535)
                 val response = DatagramPacket(buffer, buffer.size)
                 socket.receive(response)
+                val responsePayload = response.data.copyOf(response.length)
 
-                val rebuilt = IpUdpPacketBuilder.buildResponse(
-                    natEntry,
-                    response.data.copyOf(response.length)
-                )
+                // Rebuild packet for VPN/TUN
+                val rebuiltPacket = IpUdpPacketBuilder.buildResponse(natEntry, responsePayload)
+                onInboundPacket(rebuiltPacket)
 
-                onInboundPacket(rebuilt)
-
-                activeFlows.remove(sourceNodeId)
-                flowLogger.onFlowEnded(natEntry)
+                // Mark flow ended
+                activeFlows.remove(nodeKey)
+                flowLogger.markFlowEnded(nodeKey)
 
             } catch (e: Exception) {
-                Log.e("GatewayNatService", "NAT error", e)
-                activeFlows.remove(sourceNodeId)
-                flowLogger.onFlowEnded(natEntry)
+                Log.e("GatewayNatService", "NAT error for node $nodeKey", e)
+                activeFlows.remove(nodeKey)
+                flowLogger.markFlowEnded(nodeKey)
             }
         }
     }
 
+    /** Return snapshot of current active flows */
     fun getActiveFlows(): Map<String, NatEntry> = activeFlows.toMap()
 
+    /** Stop service and clean up */
     fun stop() {
         scope.cancel()
         socket.close()
