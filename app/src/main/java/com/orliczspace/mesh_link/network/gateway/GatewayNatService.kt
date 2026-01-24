@@ -7,40 +7,55 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 
+/**
+ * Stateful UDP NAT service for mesh gateway nodes.
+ * Uses 5-tuple NAT flow tracking with timeout-based expiration.
+ */
 class GatewayNatService(
     private val flowLogger: IFlowLogger,
     private val onInboundPacket: (ByteArray) -> Unit
 ) {
+
+    companion object {
+        private const val NAT_TIMEOUT_MS = 30_000L // 30 seconds
+    }
+
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val socket = DatagramSocket()
 
     /**
-     * Active NAT flows:
-     * sourceNodeId -> (NatEntry + lastActivityTime)
+     * NAT table:
+     * NatFlowKey -> Pair<NatEntry, lastSeenTimestamp>
      */
     private val activeFlows =
-        ConcurrentHashMap<String, Pair<NatEntry, Long>>()
-
-    private val NAT_TIMEOUT_MS = 30_000L          // 30 seconds
-    private val CLEANUP_INTERVAL_MS = 5_000L      // 5 seconds
+        ConcurrentHashMap<NatFlowKey, Pair<NatEntry, Long>>()
 
     init {
-        startTimeoutScheduler()
+        startTimeoutCleaner()
     }
 
     /**
-     * Handle outbound internet-bound packet
+     * Handle outbound internet-bound UDP packet.
      */
     fun handleOutbound(rawIpPacket: ByteArray, sourceNodeId: String?) {
-        val natEntry = NatEntry.createFromIpPacket(rawIpPacket, sourceNodeId)
-        val nodeKey = sourceNodeId ?: natEntry.sourceNodeId ?: return
+        if (sourceNodeId == null) return
 
-        activeFlows[nodeKey] = natEntry to System.currentTimeMillis()
-        flowLogger.logOutboundFlow(nodeKey, natEntry)
+        val natEntry = NatEntry.createFromIpPacket(rawIpPacket, sourceNodeId)
+
+        val flowKey = NatFlowKey(
+            nodeId = sourceNodeId,
+            srcIp = natEntry.srcIp,
+            srcPort = natEntry.srcPort,
+            destIp = natEntry.destIp,
+            destPort = natEntry.destPort
+        )
+
+        activeFlows[flowKey] = natEntry to System.currentTimeMillis()
+        flowLogger.logOutboundFlow(sourceNodeId, natEntry)
 
         scope.launch {
             try {
-                // Send to real internet destination
+                // Send packet to real internet destination
                 val outgoing = DatagramPacket(
                     natEntry.payload,
                     natEntry.payload.size,
@@ -49,71 +64,72 @@ class GatewayNatService(
                 )
                 socket.send(outgoing)
 
-                // Wait for response
+                // Receive response (UDP)
                 val buffer = ByteArray(65535)
                 val response = DatagramPacket(buffer, buffer.size)
                 socket.receive(response)
 
                 val responsePayload = response.data.copyOf(response.length)
 
-                // Update activity timestamp
-                activeFlows[nodeKey]?.let {
-                    activeFlows[nodeKey] = it.first to System.currentTimeMillis()
-                }
+                // Refresh flow activity
+                activeFlows[flowKey] =
+                    natEntry to System.currentTimeMillis()
 
-                // Rebuild packet back to VPN / mesh
+                // Rebuild IP/UDP packet for VPN/TUN
                 val rebuiltPacket =
                     IpUdpPacketBuilder.buildResponse(natEntry, responsePayload)
 
                 onInboundPacket(rebuiltPacket)
 
-                // Flow completed
-                activeFlows.remove(nodeKey)
-                flowLogger.markFlowEnded(nodeKey)
-
             } catch (e: Exception) {
-                Log.e("GatewayNatService", "NAT error for node $nodeKey", e)
-                activeFlows.remove(nodeKey)
-                flowLogger.markFlowEnded(nodeKey)
+                Log.e(
+                    "GatewayNatService",
+                    "NAT error for flow $flowKey",
+                    e
+                )
             }
         }
     }
 
     /**
-     * Periodically removes expired NAT flows
+     * Periodically remove expired NAT flows.
      */
-    private fun startTimeoutScheduler() {
+    private fun startTimeoutCleaner() {
         scope.launch {
             while (isActive) {
-                delay(CLEANUP_INTERVAL_MS)
+                delay(5_000)
 
                 val now = System.currentTimeMillis()
-                val expiredKeys = mutableListOf<String>()
+                val expiredKeys = mutableListOf<NatFlowKey>()
 
-                for ((nodeId, pair) in activeFlows) {
-                    val lastSeen = pair.second
+                for ((key, value) in activeFlows) {
+                    val lastSeen = value.second
                     if (now - lastSeen > NAT_TIMEOUT_MS) {
-                        expiredKeys.add(nodeId)
+                        expiredKeys.add(key)
                     }
                 }
 
-                for (nodeId in expiredKeys) {
-                    Log.d("GatewayNatService", "NAT flow timed out for node $nodeId")
-                    activeFlows.remove(nodeId)
-                    flowLogger.markFlowEnded(nodeId)
+                for (key in expiredKeys) {
+                    activeFlows.remove(key)
+                    flowLogger.markFlowEnded(key.nodeId)
+                    Log.d(
+                        "GatewayNatService",
+                        "Expired NAT flow: $key"
+                    )
                 }
             }
         }
     }
 
     /**
-     * Snapshot of active NAT flows (without timestamps)
+     * Snapshot of active NAT flows (for UI / debugging).
      */
-    fun getActiveFlows(): Map<String, NatEntry> =
-        activeFlows.mapValues { it.value.first }
+    fun getActiveFlows(): List<NatEntry> {
+        return activeFlows.values.map { it.first }
+    }
 
     /**
-     * Shutdown NAT service
+     * Stop NAT service.
      */
     fun stop() {
         scope.cancel()
