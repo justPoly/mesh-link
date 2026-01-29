@@ -13,30 +13,44 @@ class FlowLogDbHelper(context: Context) :
         private const val DATABASE_VERSION = 2
 
         const val TABLE_FLOWS = "flows"
-        const val COLUMN_ID = "id"
-        const val COLUMN_NODE_ID = "node_id"
-        const val COLUMN_SRC_IP = "src_ip"
-        const val COLUMN_SRC_PORT = "src_port"
-        const val COLUMN_DEST_IP = "dest_ip"
-        const val COLUMN_DEST_PORT = "dest_port"
-        const val COLUMN_START_TIMESTAMP = "start_timestamp"
-        const val COLUMN_END_TIMESTAMP = "end_timestamp"
+
+        const val COL_ID = "id"
+        const val COL_NODE_ID = "node_id"
+        const val COL_SRC_IP = "src_ip"
+        const val COL_SRC_PORT = "src_port"
+        const val COL_DEST_IP = "dest_ip"
+        const val COL_DEST_PORT = "dest_port"
+
+        const val COL_PKTS_OUT = "pkts_out"
+        const val COL_PKTS_IN = "pkts_in"
+        const val COL_BYTES_OUT = "bytes_out"
+        const val COL_BYTES_IN = "bytes_in"
+
+        const val COL_START_TS = "start_ts"
+        const val COL_END_TS = "end_ts"
+        const val COL_DURATION = "duration_ms"
     }
 
     override fun onCreate(db: SQLiteDatabase) {
-        val createTable = """
+        val sql = """
             CREATE TABLE $TABLE_FLOWS (
-                $COLUMN_ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                $COLUMN_NODE_ID TEXT,
-                $COLUMN_SRC_IP TEXT,
-                $COLUMN_SRC_PORT INTEGER,
-                $COLUMN_DEST_IP TEXT,
-                $COLUMN_DEST_PORT INTEGER,
-                $COLUMN_START_TIMESTAMP INTEGER,
-                $COLUMN_END_TIMESTAMP INTEGER
+                $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                $COL_NODE_ID TEXT,
+                $COL_SRC_IP TEXT,
+                $COL_SRC_PORT INTEGER,
+                $COL_DEST_IP TEXT,
+                $COL_DEST_PORT INTEGER,
+                $COL_PKTS_OUT INTEGER,
+                $COL_PKTS_IN INTEGER,
+                $COL_BYTES_OUT INTEGER,
+                $COL_BYTES_IN INTEGER,
+                $COL_START_TS INTEGER,
+                $COL_END_TS INTEGER,
+                $COL_DURATION INTEGER
             )
         """.trimIndent()
-        db.execSQL(createTable)
+
+        db.execSQL(sql)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -44,32 +58,24 @@ class FlowLogDbHelper(context: Context) :
         onCreate(db)
     }
 
-    /** Insert a new NAT flow */
-    fun insertFlow(nodeId: String, entry: NatEntry) {
+    fun insertCompletedFlow(metrics: NatFlowMetrics) {
         val values = ContentValues().apply {
-            put(COLUMN_NODE_ID, nodeId)
-            put(COLUMN_SRC_IP, entry.srcIp)
-            put(COLUMN_SRC_PORT, entry.srcPort)
-            put(COLUMN_DEST_IP, entry.destIp)
-            put(COLUMN_DEST_PORT, entry.destPort)
-            put(COLUMN_START_TIMESTAMP, System.currentTimeMillis())
-            put(COLUMN_END_TIMESTAMP, null as Long?)
+            put(COL_NODE_ID, metrics.nodeId)
+            put(COL_SRC_IP, metrics.srcIp)
+            put(COL_SRC_PORT, metrics.srcPort)
+            put(COL_DEST_IP, metrics.destIp)
+            put(COL_DEST_PORT, metrics.destPort)
+
+            put(COL_PKTS_OUT, metrics.packetsOut)
+            put(COL_PKTS_IN, metrics.packetsIn)
+            put(COL_BYTES_OUT, metrics.bytesOut)
+            put(COL_BYTES_IN, metrics.bytesIn)
+
+            put(COL_START_TS, metrics.startTime)
+            put(COL_END_TS, metrics.lastSeen)
+            put(COL_DURATION, metrics.durationMs())
         }
 
         writableDatabase.insert(TABLE_FLOWS, null, values)
-    }
-
-    /** Mark a flow as ended */
-    fun markFlowEnded(nodeId: String) {
-        val values = ContentValues().apply {
-            put(COLUMN_END_TIMESTAMP, System.currentTimeMillis())
-        }
-
-        writableDatabase.update(
-            TABLE_FLOWS,
-            values,
-            "$COLUMN_NODE_ID = ? AND $COLUMN_END_TIMESTAMP IS NULL",
-            arrayOf(nodeId)
-        )
     }
 }

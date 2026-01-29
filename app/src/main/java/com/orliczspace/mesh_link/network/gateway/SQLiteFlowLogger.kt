@@ -8,15 +8,18 @@ class SQLiteFlowLogger(context: Context) : IFlowLogger {
     private val dbHelper = FlowLogDbHelper(context)
 
     override fun logOutboundFlow(nodeId: String, entry: NatEntry) {
-        dbHelper.insertFlow(nodeId, entry)
-        Log.d(
-            "SQLiteFlowLogger",
-            "Flow started: ${entry.srcIp}:${entry.srcPort} → ${entry.destIp}:${entry.destPort}"
-        )
+        Log.d("FlowLogger", "Outbound flow started for $nodeId")
     }
 
     override fun markFlowEnded(nodeId: String) {
-        dbHelper.markFlowEnded(nodeId)
-        Log.d("SQLiteFlowLogger", "Flow ended for node $nodeId")
+        Log.d("FlowLogger", "Flow ended for $nodeId")
+    }
+
+    override fun persistMetrics(metrics: NatFlowMetrics) {
+        dbHelper.insertCompletedFlow(metrics)
+        Log.d(
+            "FlowLogger",
+            "Persisted flow metrics: node=${metrics.nodeId}, duration=${metrics.durationMs()}ms"
+        )
     }
 }
