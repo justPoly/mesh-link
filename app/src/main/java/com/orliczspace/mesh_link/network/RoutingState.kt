@@ -6,9 +6,12 @@ package com.orliczspace.mesh_link.network
  */
 data class RoutingState(
     val nodeId: String,
-    val averageLatencyMs: Long = Long.MAX_VALUE,
-    val stabilityScore: Double = 0.0,
-    val hasInternetAccess: Boolean = false,
+    val averageLatencyMs: Int,
+    val stabilityScore: Double,
+    val hasInternetAccess: Boolean,
     val gatewayScore: Double = 0.0,
-    val isGateway: Boolean = false
+    val isGateway: Boolean = false,
+    val lastLatencyMs: Int = averageLatencyMs,
+    val degradationCount: Int = 0
 )
+

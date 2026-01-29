@@ -7,21 +7,37 @@ class RoutingStateRepository(
     private val linkProbeService: LinkProbeService
 ) {
 
-    // Observable routing table (nodeId → RoutingState)
+    companion object {
+        private const val RTT_DEGRADATION_THRESHOLD = 1.3
+        private const val MAX_DEGRADATION_COUNT = 3
+    }
+
     val routingTable = mutableStateMapOf<String, RoutingState>()
 
-    /**
-     * Update routing state for a neighbour.
-     * Safe to call even before probes complete.
-     */
     fun updateNode(
         nodeId: String,
         hasInternetAccess: Boolean
     ) {
-        val avgRtt = linkProbeService.getAverageRtt(nodeId) ?: -1
-        val stability = linkProbeService.getStability(nodeId)
+        val newRttLong = linkProbeService.getAverageRtt(nodeId) ?: return
+        val newRtt = newRttLong.toInt()
 
-        // Normalized stability score (0–100)
+        val stability = linkProbeService.getStability(nodeId)
+        val oldState = routingTable[nodeId]
+
+        val lastRtt = oldState?.averageLatencyMs ?: newRtt
+
+        val degradationRatio =
+            if (lastRtt > 0)
+                newRtt.toDouble() / lastRtt.toDouble()
+            else
+                1.0
+
+        val degradationCount =
+            if (degradationRatio > RTT_DEGRADATION_THRESHOLD)
+                (oldState?.degradationCount ?: 0) + 1
+            else
+                0
+
         val stabilityScore = when {
             stability <= 10 -> 100.0
             stability <= 30 -> 80.0
@@ -32,23 +48,34 @@ class RoutingStateRepository(
 
         routingTable[nodeId] = RoutingState(
             nodeId = nodeId,
-            averageLatencyMs = max(avgRtt, 0),
+            averageLatencyMs = max(newRtt, 0),
+            lastLatencyMs = lastRtt,
+            degradationCount = degradationCount,
             stabilityScore = stabilityScore,
-            hasInternetAccess = hasInternetAccess
+            hasInternetAccess = hasInternetAccess,
+            isGateway = oldState?.isGateway ?: false
         )
+
+        // 🔥 Adaptive gateway re-election trigger
+        if (
+            oldState?.isGateway == true &&
+            degradationCount >= MAX_DEGRADATION_COUNT
+        ) {
+            electGateway()
+        }
     }
 
     fun removeNode(nodeId: String) {
         routingTable.remove(nodeId)
     }
 
-    /**
-     * Elect the best gateway based on computed gateway score.
-     */
     fun electGateway(): RoutingState? {
         val updatedStates = routingTable.values.map { state ->
             val score = GatewayScorer.score(state)
-            state.copy(gatewayScore = score)
+            state.copy(
+                gatewayScore = score,
+                degradationCount = 0 // reset after election
+            )
         }
 
         val gateway = updatedStates.maxByOrNull { it.gatewayScore }
@@ -67,7 +94,6 @@ class RoutingStateRepository(
             ?: return null
 
         return if (gateway.nodeId == localNodeId) {
-            // We ARE the gateway
             RouteDecision(
                 destination = "INTERNET",
                 nextHopNodeId = null,
