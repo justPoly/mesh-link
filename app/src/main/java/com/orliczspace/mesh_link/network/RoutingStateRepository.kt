@@ -10,9 +10,7 @@ class RoutingStateRepository(
     companion object {
         private const val RTT_DEGRADATION_THRESHOLD = 1.3
         private const val MAX_DEGRADATION_COUNT = 3
-
-        // Smoothing factor α for EWMA: higher α → more sensitive to recent RTT
-        private const val RTT_SMOOTHING_ALPHA = 0.3
+        private const val RTT_SMOOTHING_ALPHA = 0.3  // EWMA smoothing factor
     }
 
     val routingTable = mutableStateMapOf<String, RoutingState>()
@@ -23,24 +21,21 @@ class RoutingStateRepository(
     ) {
         val newRttLong = linkProbeService.getAverageRtt(nodeId) ?: return
         val newRtt = newRttLong.toInt()
+
         val stability = linkProbeService.getStability(nodeId)
         val oldState = routingTable[nodeId]
 
-        // ----------- EWMA RTT smoothing -----------
+        // --- EWMA RTT smoothing ---
         val smoothedRtt = if (oldState != null) {
-            // RTT_EWMA_new = α * RTT_new + (1 - α) * RTT_old
             (RTT_SMOOTHING_ALPHA * newRtt + (1 - RTT_SMOOTHING_ALPHA) * oldState.averageLatencyMs).toInt()
         } else {
             newRtt
         }
 
+        // RTT degradation detection
         val lastRtt = oldState?.averageLatencyMs ?: smoothedRtt
-
         val degradationRatio =
-            if (lastRtt > 0)
-                smoothedRtt.toDouble() / lastRtt.toDouble()
-            else
-                1.0
+            if (lastRtt > 0) smoothedRtt.toDouble() / lastRtt.toDouble() else 1.0
 
         val degradationCount =
             if (degradationRatio > RTT_DEGRADATION_THRESHOLD)
@@ -48,6 +43,7 @@ class RoutingStateRepository(
             else
                 0
 
+        // Stability score normalization
         val stabilityScore = when {
             stability <= 10 -> 100.0
             stability <= 30 -> 80.0
@@ -58,7 +54,7 @@ class RoutingStateRepository(
 
         routingTable[nodeId] = RoutingState(
             nodeId = nodeId,
-            averageLatencyMs = max(smoothedRtt, 0),
+            averageLatencyMs = smoothedRtt,
             lastLatencyMs = lastRtt,
             degradationCount = degradationCount,
             stabilityScore = stabilityScore,
@@ -67,8 +63,7 @@ class RoutingStateRepository(
         )
 
         // 🔥 Adaptive re-election trigger
-        if (
-            oldState?.isGateway == true &&
+        if (oldState?.isGateway == true &&
             degradationCount >= MAX_DEGRADATION_COUNT
         ) {
             electGateway()

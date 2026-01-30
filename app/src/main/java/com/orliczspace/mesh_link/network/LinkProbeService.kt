@@ -10,7 +10,7 @@ import kotlin.math.abs
 
 /**
  * Probe-based link quality + identity discovery service.
- * Works ONLY with real IP-layer connectivity.
+ * Maintains smoothed RTT per neighbor (EWMA) for adaptive routing.
  */
 class LinkProbeService(
     private val localNodeId: String,
@@ -22,10 +22,13 @@ class LinkProbeService(
 
     /* ---------------- STATE ---------------- */
 
-    // RTT history per neighbour (nodeId → RTT samples)
+    // Smoothed RTT per neighbour (nodeId → EWMA RTT in ms)
+    private val smoothedRtt = ConcurrentHashMap<String, Double>()
+
+    // Raw RTT history per neighbour (for stability calculation)
     private val rttHistory = ConcurrentHashMap<String, MutableList<Long>>()
 
-    // Active probe timestamps (seq → sendTime)
+    // Pending probe timestamps (seq → sendTime)
     private val pendingProbes = ConcurrentHashMap<Long, Long>()
 
     // Known peers discovered via probes (nodeId → IP)
@@ -33,8 +36,13 @@ class LinkProbeService(
 
     private var sequenceCounter = 0L
 
-    // 🔽 NEW: callback for adaptive probe scheduler
+    // Callback for adaptive probe scheduler
     var onProbeResponse: ((String) -> Unit)? = null
+
+    companion object {
+        private const val EWMA_ALPHA = 0.2  // smoothing factor
+        private const val MAX_HISTORY = 20   // raw history size
+    }
 
     /* ---------------- LIFECYCLE ---------------- */
 
@@ -52,16 +60,17 @@ class LinkProbeService(
 
     /* ---------------- EXTERNAL API ---------------- */
 
-    fun getKnownPeers(): Map<String, String> =
-        knownPeers.toMap()
+    fun getKnownPeers(): Map<String, String> = knownPeers.toMap()
 
+    /** Smoothed RTT in ms for this neighbor */
     fun getAverageRtt(neighbourId: String): Long? =
-        rttHistory[neighbourId]?.average()?.toLong()
+        smoothedRtt[neighbourId]?.toLong()
 
+    /** Stability metric (average absolute deviation from smoothed RTT) */
     fun getStability(neighbourId: String): Double {
         val history = rttHistory[neighbourId] ?: return 0.0
-        val avg = history.average()
-        return history.map { abs(it - avg) }.average()
+        val avgRtt = smoothedRtt[neighbourId] ?: history.average()
+        return history.map { abs(it - avgRtt) }.average()
     }
 
     /* ---------------- PROBE SEND ---------------- */
@@ -106,18 +115,9 @@ class LinkProbeService(
                 try {
                     val packet = DatagramPacket(buffer, buffer.size)
                     socket?.receive(packet)
-
-                    handleMessage(
-                        data = packet.data,
-                        length = packet.length,
-                        address = packet.address,
-                        port = packet.port
-                    )
-
+                    handleMessage(packet.data, packet.length, packet.address, packet.port)
                 } catch (e: Exception) {
-                    if (isActive) {
-                        Log.e("LinkProbeService", "Receive error: ${e.message}")
-                    }
+                    if (isActive) Log.e("LinkProbeService", "Receive error: ${e.message}")
                 }
             }
         }
@@ -137,37 +137,15 @@ class LinkProbeService(
         }
 
         when (message.type) {
-
-            /* ---------- PROBE REQUEST ---------- */
-
             ProbeMessage.Type.REQUEST -> {
-                registerPeer(
-                    nodeId = message.senderId,
-                    ip = address.hostAddress,
-                    capabilities = message.capabilities
-                )
-
+                registerPeer(message.senderId, address.hostAddress, message.capabilities)
                 sendProbeResponse(message, address, port)
             }
 
-            /* ---------- PROBE RESPONSE ---------- */
-
             ProbeMessage.Type.RESPONSE -> {
-                registerPeer(
-                    nodeId = message.senderId,
-                    ip = address.hostAddress,
-                    capabilities = message.capabilities
-                )
-
-                recordRtt(
-                    neighbourId = message.senderId,
-                    requestTime = message.timestamp,
-                    responseTime = System.currentTimeMillis()
-                )
-
-                // NEW: notify adaptive scheduler
+                registerPeer(message.senderId, address.hostAddress, message.capabilities)
+                recordRtt(message.senderId, message.timestamp, System.currentTimeMillis())
                 onProbeResponse?.invoke(message.senderId)
-
                 pendingProbes.remove(message.sequence)
             }
         }
@@ -191,14 +169,7 @@ class LinkProbeService(
         scope.launch {
             try {
                 val data = ProbeCodec.encode(response)
-                socket?.send(
-                    DatagramPacket(
-                        data,
-                        data.size,
-                        address,
-                        port
-                    )
-                )
+                socket?.send(DatagramPacket(data, data.size, address, port))
             } catch (e: Exception) {
                 Log.e("LinkProbeService", "Response error: ${e.message}")
             }
@@ -207,45 +178,37 @@ class LinkProbeService(
 
     /* ---------------- PEER REGISTRATION ---------------- */
 
-    private fun registerPeer(
-        nodeId: String,
-        ip: String,
-        capabilities: Capabilities?
-    ) {
+    private fun registerPeer(nodeId: String, ip: String, capabilities: Capabilities?) {
         val existing = knownPeers[nodeId]
-
         if (existing == null || existing != ip) {
             knownPeers[nodeId] = ip
-            Log.d(
-                "LinkProbeService",
-                "Peer registered: $nodeId @ $ip | $capabilities"
-            )
+            Log.d("LinkProbeService", "Peer registered: $nodeId @ $ip | $capabilities")
         }
     }
 
     /* ---------------- METRICS ---------------- */
 
-    private fun recordRtt(
-        neighbourId: String,
-        requestTime: Long,
-        responseTime: Long
-
-    ) {
+    private fun recordRtt(neighbourId: String, requestTime: Long, responseTime: Long) {
         val rtt = responseTime - requestTime
-        val history =
-            rttHistory.getOrPut(neighbourId) { mutableListOf() }
+        val history = rttHistory.getOrPut(neighbourId) { mutableListOf() }
 
+        // Update raw history
         history.add(rtt)
-        if (history.size > 20) history.removeAt(0)
+        if (history.size > MAX_HISTORY) history.removeAt(0)
 
-        Log.d("LinkProbeService", "RTT $neighbourId = ${rtt}ms")
+        // EWMA smoothing
+        val prev = smoothedRtt[neighbourId] ?: rtt.toDouble()
+        val newSmoothed = EWMA_ALPHA * rtt + (1 - EWMA_ALPHA) * prev
+        smoothedRtt[neighbourId] = newSmoothed
+
+        Log.d("LinkProbeService", "RTT $neighbourId = ${rtt}ms, smoothed = ${newSmoothed.format(1)}ms")
     }
 
     /* ---------------- CAPABILITIES ---------------- */
     private fun getCapabilities(): Capabilities {
-        // Future: battery, relay role, bandwidth, etc.
-        return Capabilities(
-            hasInternet = false
-        )
+        return Capabilities(hasInternet = false)
     }
+
+    /* ---------------- HELPERS ---------------- */
+    private fun Double.format(digits: Int) = "%.${digits}f".format(this)
 }
