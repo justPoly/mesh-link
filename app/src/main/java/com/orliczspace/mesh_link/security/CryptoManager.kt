@@ -1,50 +1,42 @@
-package com.orliczspace.mesh_link.security
+package com.orliczspace.mesh_link.network.security
 
+import java.security.SecureRandom
 import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
-import kotlin.random.Random
+import javax.crypto.spec.SecretKeySpec
 
 object CryptoManager {
 
-    private const val AES_KEY_SIZE = 256
-    private const val GCM_IV_SIZE = 12
-    private const val GCM_TAG_SIZE = 128
+    private const val AES_MODE = "AES/GCM/NoPadding"
+    private const val TAG_LENGTH = 128
+    private const val IV_LENGTH = 12
 
-    // 🔑 TEMP: shared mesh key (Phase 1)
-    private val secretKey: SecretKey by lazy {
-        val keyGen = KeyGenerator.getInstance("AES")
-        keyGen.init(AES_KEY_SIZE)
-        keyGen.generateKey()
-    }
+    // 🔑 DEMO KEY — replace with key exchange later
+    private val key: SecretKey = SecretKeySpec(
+        ByteArray(16) { 0x01 }, // placeholder
+        "AES"
+    )
 
-    fun encrypt(data: ByteArray): ByteArray {
-        val iv = Random.nextBytes(GCM_IV_SIZE)
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(
-            Cipher.ENCRYPT_MODE,
-            secretKey,
-            GCMParameterSpec(GCM_TAG_SIZE, iv)
-        )
+    fun encrypt(plain: ByteArray): ByteArray {
+        val iv = ByteArray(IV_LENGTH)
+        SecureRandom().nextBytes(iv)
 
-        val encrypted = cipher.doFinal(data)
+        val cipher = Cipher.getInstance(AES_MODE)
+        cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_LENGTH, iv))
 
-        // IV + ciphertext
+        val encrypted = cipher.doFinal(plain)
+
         return iv + encrypted
     }
 
-    fun decrypt(data: ByteArray): ByteArray {
-        val iv = data.copyOfRange(0, GCM_IV_SIZE)
-        val ciphertext = data.copyOfRange(GCM_IV_SIZE, data.size)
+    fun decrypt(ciphertext: ByteArray): ByteArray {
+        val iv = ciphertext.copyOfRange(0, IV_LENGTH)
+        val payload = ciphertext.copyOfRange(IV_LENGTH, ciphertext.size)
 
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(
-            Cipher.DECRYPT_MODE,
-            secretKey,
-            GCMParameterSpec(GCM_TAG_SIZE, iv)
-        )
+        val cipher = Cipher.getInstance(AES_MODE)
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_LENGTH, iv))
 
-        return cipher.doFinal(ciphertext)
+        return cipher.doFinal(payload)
     }
 }

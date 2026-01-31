@@ -2,9 +2,9 @@ package com.orliczspace.mesh_link.network
 
 import android.util.Log
 import com.orliczspace.mesh_link.network.gateway.GatewayNatService
-import com.orliczspace.mesh_link.network.gateway.NatEntry
 import com.orliczspace.mesh_link.network.packet.MeshPacket
 import com.orliczspace.mesh_link.network.packet.PacketType
+import com.orliczspace.mesh_link.network.security.CryptoManager
 import kotlinx.coroutines.*
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -20,138 +20,104 @@ class PacketForwarder(
 
     companion object {
         private const val TAG = "PacketForwarder"
-        private const val MAX_RETRIES = 3
-        private const val ACK_TIMEOUT_MS = 1500L
+        private const val DEDUP_WINDOW_MS = 10_000L
     }
 
-    /** packetId → ACK waiter */
-    private val pendingAcks = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    /** Callback to deliver payload to local app */
+    // Packet de-duplication cache
+    private val seenPackets = ConcurrentHashMap<String, Long>()
+
     interface PacketDeliveryListener {
         fun onPacketDelivered(payload: ByteArray)
     }
 
     var deliveryListener: PacketDeliveryListener? = null
 
-    /* -------------------------------------------------------------
-     * OUTGOING
-     * ------------------------------------------------------------- */
-
-    suspend fun forwardPacket(
-        sourceNodeId: String,
-        packet: MeshPacket
-    ) {
+    /**
+     * Forward a packet to the next hop
+     */
+    suspend fun forward(packet: MeshPacket) {
         if (packet.ttl <= 0) {
-            Log.w(TAG, "Dropped packet ${packet.packetId}: TTL expired")
+            Log.d(TAG, "Packet dropped: TTL expired")
             return
         }
 
-        // Handle NAT-bound packets
+        // NAT forwarding handled separately
         if (packet.type == PacketType.NAT_FORWARD) {
-            gatewayNatService.handleOutbound(packet.serialize(), sourceNodeId)
+            gatewayNatService.handleOutbound(
+                packet.payload,
+                packet.sourceNodeId
+            )
             return
         }
 
-        // Determine next hop
-        val nextHopNode = packet.destinationNodeId?.let { routingRepository.routingTable[it] }
-        if (nextHopNode == null) {
-            Log.e(TAG, "No route to ${packet.destinationNodeId}")
-            return
-        }
-
-        val target = InetSocketAddress(nextHopNode.ip, nextHopNode.port)
-        sendWithReliability(packet, target)
-    }
-
-    private suspend fun sendWithReliability(packet: MeshPacket, target: InetSocketAddress) {
-        repeat(MAX_RETRIES) { attempt ->
-            Log.d(TAG, "Sending ${packet.packetId}, attempt ${attempt + 1}")
-
-            val ackDeferred = CompletableDeferred<Boolean>()
-            pendingAcks[packet.packetId] = ackDeferred
-
-            sendRaw(packet, target)
-
-            val ackReceived = withTimeoutOrNull(ACK_TIMEOUT_MS) { ackDeferred.await() }
-            if (ackReceived == true) {
-                Log.d(TAG, "ACK received for ${packet.packetId}")
-                pendingAcks.remove(packet.packetId)
+        val nextHop = packet.destinationNodeId
+            ?.let { routingRepository.routingTable[it] }
+            ?: run {
+                Log.w(TAG, "No route to destination ${packet.destinationNodeId}")
                 return
             }
 
-            Log.w(TAG, "ACK timeout for ${packet.packetId}")
-        }
+        val encoded = ForwardPacketCodec.encode(packet)
+        val encrypted = CryptoManager.encrypt(encoded)
 
-        pendingAcks.remove(packet.packetId)
-        Log.e(TAG, "Delivery failed: ${packet.packetId}")
-    }
+        val datagram = DatagramPacket(
+            encrypted,
+            encrypted.size,
+            InetSocketAddress(nextHop.ip, nextHop.port)
+        )
 
-    private fun sendRaw(packet: MeshPacket, target: InetSocketAddress) {
-        val bytes = packet.serialize()
-        val datagram = DatagramPacket(bytes, bytes.size, target.address, target.port)
         socket.send(datagram)
+
+        Log.d(TAG, "Packet forwarded to ${nextHop.ip}:${nextHop.port}")
     }
 
-    /* -------------------------------------------------------------
-     * INCOMING
-     * ------------------------------------------------------------- */
+    /**
+     * Called when a UDP datagram is received
+     */
+    fun onDatagramReceived(
+        data: ByteArray,
+        length: Int,
+        sender: InetAddress,
+        port: Int
+    ) {
+        try {
+            val decrypted = CryptoManager.decrypt(data.copyOf(length))
+            val packet = ForwardPacketCodec.decode(decrypted)
 
-    fun onDatagramReceived(data: ByteArray, length: Int, sender: InetAddress, senderPort: Int) {
-        val packet = MeshPacket.deserialize(data, length)
-        handleIncomingPacket(packet, sender, senderPort)
-    }
-
-    private fun handleIncomingPacket(packet: MeshPacket, sender: InetAddress, senderPort: Int) {
-        when (packet.type) {
-            PacketType.ACK -> handleAck(packet)
-            PacketType.DATA -> handleIncomingData(packet, sender, senderPort)
-            PacketType.NAT_FORWARD -> gatewayNatService.handleInbound(packet.serialize())
-            else -> {
-                Log.w(TAG, "Unhandled packet type ${packet.type}")
+            // Drop duplicate packets
+            if (isDuplicate(packet.packetId)) {
+                Log.d(TAG, "Duplicate packet dropped: ${packet.packetId}")
+                return
             }
+
+            // Packet is for this node
+            if (packet.destinationNodeId == android.os.Build.MODEL) {
+                deliveryListener?.onPacketDelivered(packet.payload)
+                return
+            }
+
+            // Forward packet with decremented TTL
+            scope.launch {
+                forward(packet.copy(ttl = packet.ttl - 1))
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to process incoming packet", e)
         }
     }
 
-    private fun handleAck(packet: MeshPacket) {
-        packet.ackForPacketId?.let { ackedId ->
-            pendingAcks[ackedId]?.complete(true)
-        }
-    }
+    /**
+     * Packet de-duplication logic
+     */
+    private fun isDuplicate(id: String): Boolean {
+        val now = System.currentTimeMillis()
 
-    private fun handleIncomingData(packet: MeshPacket, sender: InetAddress, senderPort: Int) {
-        if (packet.requiresAck) {
-            sendAck(packet, sender, senderPort)
-        }
+        // Cleanup old entries
+        seenPackets.entries.removeIf { now - it.value > DEDUP_WINDOW_MS }
 
-        // Deliver to local node if destination matches
-        if (packet.destinationNodeId == android.os.Build.MODEL) {
-            Log.d(TAG, "Delivered locally: ${packet.packetId}")
-            deliveryListener?.onPacketDelivered(packet.payload)
-            return
-        }
-
-        // Forward packet with TTL decremented
-        val forwarded = packet.copy(ttl = packet.ttl - 1)
-        scope.launch { forwardPacket(forwarded.sourceNodeId, forwarded) }
-    }
-
-    private fun sendAck(packet: MeshPacket, sender: InetAddress, senderPort: Int) {
-        // Use the local device model as the sourceNodeId
-        val sourceNodeId = android.os.Build.MODEL ?: "unknown-node"
-
-        // Create ACK packet with correct sourceNodeId
-        val ack = MeshPacket.createAck(sourceNodeId = sourceNodeId, packetId = packet.packetId)
-
-        // Convert to DatagramPacket and send
-        val bytes = ack.serialize()
-        val datagram = DatagramPacket(bytes, bytes.size, sender, senderPort)
-        socket.send(datagram)
-    }
-
-    /** Get active internet flows (stub for VPN UI) */
-    fun getActiveInternetFlows(): Map<String, NatEntry> {
-        return gatewayNatService.getActiveFlows()
+        // Returns true if packet already exists
+        return seenPackets.putIfAbsent(id, now) != null
     }
 }

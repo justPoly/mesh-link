@@ -1,85 +1,66 @@
 package com.orliczspace.mesh_link.network
 
+import com.orliczspace.mesh_link.network.packet.MeshPacket
+import com.orliczspace.mesh_link.network.packet.PacketType
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 
 object ForwardPacketCodec {
 
-    fun encode(packet: ForwardPacket): ByteArray {
-        val sourceBytes = packet.sourceNodeId.toByteArray(StandardCharsets.UTF_8)
-        val destBytes = packet.destinationNodeId
-            ?.toByteArray(StandardCharsets.UTF_8)
+    fun encode(packet: MeshPacket): ByteArray {
+        val src = packet.sourceNodeId.toByteArray(StandardCharsets.UTF_8)
+        val dst = packet.destinationNodeId?.toByteArray(StandardCharsets.UTF_8) ?: ByteArray(0)
+        val payload = packet.payload
 
-        val hasDestination = destBytes != null
+        val buffer = ByteBuffer.allocate(
+            4 + src.size +
+                    4 + dst.size +
+                    4 + payload.size +
+                    1 + 1 + 1
+        )
 
-        val bufferSize =
-            4 + sourceBytes.size +        // source length + source
-                    1 +                            // hasDestination flag
-                    (if (hasDestination) 4 + destBytes!!.size else 0) +
-                    4 +                            // TTL
-                    4 + packet.payload.size        // payload length + payload
+        buffer.putInt(src.size)
+        buffer.put(src)
 
-        val buffer = ByteBuffer.allocate(bufferSize)
+        buffer.putInt(dst.size)
+        buffer.put(dst)
 
-        // Source
-        buffer.putInt(sourceBytes.size)
-        buffer.put(sourceBytes)
+        buffer.putInt(payload.size)
+        buffer.put(payload)
 
-        // Destination flag
-        buffer.put(if (hasDestination) 1 else 0)
-
-        // Destination (if present)
-        if (hasDestination) {
-            buffer.putInt(destBytes!!.size)
-            buffer.put(destBytes)
-        }
-
-        // TTL
-        buffer.putInt(packet.ttl)
-
-        // Payload
-        buffer.putInt(packet.payload.size)
-        buffer.put(packet.payload)
+        buffer.put(packet.type.ordinal.toByte())
+        buffer.put(packet.ttl.toByte())
+        buffer.put(if (packet.requiresAck) 1 else 0)
 
         return buffer.array()
     }
 
-    fun decode(data: ByteArray, length: Int): ForwardPacket {
-        val buffer = ByteBuffer.wrap(data, 0, length)
+    fun decode(bytes: ByteArray): MeshPacket {
+        val buffer = ByteBuffer.wrap(bytes)
 
-        // Source
-        val sourceLen = buffer.int
-        val sourceBytes = ByteArray(sourceLen)
-        buffer.get(sourceBytes)
-        val sourceNodeId = String(sourceBytes, StandardCharsets.UTF_8)
+        val srcLen = buffer.int
+        val src = ByteArray(srcLen)
+        buffer.get(src)
 
-        // Destination flag
-        val hasDestination = buffer.get().toInt() == 1
+        val dstLen = buffer.int
+        val dst = ByteArray(dstLen)
+        buffer.get(dst)
 
-        // Destination (nullable)
-        val destinationNodeId =
-            if (hasDestination) {
-                val destLen = buffer.int
-                val destBytes = ByteArray(destLen)
-                buffer.get(destBytes)
-                String(destBytes, StandardCharsets.UTF_8)
-            } else {
-                null
-            }
-
-        // TTL
-        val ttl = buffer.int
-
-        // Payload
         val payloadLen = buffer.int
         val payload = ByteArray(payloadLen)
         buffer.get(payload)
 
-        return ForwardPacket(
-            sourceNodeId = sourceNodeId,
-            destinationNodeId = destinationNodeId,
+        val type = PacketType.values()[buffer.get().toInt()]
+        val ttl = buffer.get().toInt()
+        val ack = buffer.get().toInt() == 1
+
+        return MeshPacket(
+            sourceNodeId = String(src),
+            destinationNodeId = if (dst.isEmpty()) null else String(dst),
+            payload = payload,
+            type = type,
             ttl = ttl,
-            payload = payload
+            requiresAck = ack
         )
     }
 }
