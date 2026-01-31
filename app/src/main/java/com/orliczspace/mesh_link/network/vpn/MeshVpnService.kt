@@ -6,8 +6,9 @@ import android.os.Binder
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
-import com.orliczspace.mesh_link.network.ForwardPacket
 import com.orliczspace.mesh_link.network.PacketForwarder
+import com.orliczspace.mesh_link.network.packet.MeshPacket
+import com.orliczspace.mesh_link.network.packet.PacketType
 import com.orliczspace.mesh_link.network.gateway.IpUdpPacketBuilder
 import com.orliczspace.mesh_link.network.gateway.NatEntry
 import kotlinx.coroutines.*
@@ -32,8 +33,7 @@ class MeshVpnService : VpnService() {
         fun getService(): MeshVpnService = this@MeshVpnService
     }
 
-    private val binder = LocalBinder()
-    override fun onBind(intent: Intent?): IBinder = binder
+    override fun onBind(intent: Intent?): IBinder = LocalBinder()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (tunInterface == null) {
@@ -55,23 +55,26 @@ class MeshVpnService : VpnService() {
     }
 
     private fun setupVpn() {
-        val builder = Builder()
+        tunInterface = Builder()
             .setSession("MeshLink VPN")
             .addAddress("10.0.0.2", 32)
-            .addRoute("10.0.0.0", 8)
+            .addRoute("0.0.0.0", 0)
             .setBlocking(true)
-
-        tunInterface = builder.establish() ?: throw IllegalStateException("VPN establish failed")
+            .establish()
 
         val fd = tunInterface!!.fileDescriptor
         tunInput = FileInputStream(fd)
         tunOutput = FileOutputStream(fd)
+
         Log.d(TAG, "VPN interface established")
     }
 
     private fun startTunReader() {
+        val sourceNodeId = android.os.Build.MODEL ?: "unknown-node"
+
         scope.launch {
             val buffer = ByteArray(65535)
+
             while (isActive) {
                 try {
                     val len = tunInput?.read(buffer) ?: break
@@ -79,16 +82,21 @@ class MeshVpnService : VpnService() {
 
                     val rawPacket = buffer.copyOf(len)
 
-                    val forwardPacket = ForwardPacket(
-                        sourceNodeId = android.os.Build.MODEL ?: "unknown-node",
-                        destinationNodeId = null,
+                    // Wrap the raw packet in a MeshPacket for forwarding
+                    val meshPacket = MeshPacket(
+                        sourceNodeId = sourceNodeId,
+                        destinationNodeId = "INTERNET",
+                        payload = rawPacket,
+                        type = PacketType.NAT_FORWARD,
                         ttl = 8,
-                        payload = rawPacket
+                        requiresAck = false
                     )
 
-                    // ✅ Safe call to send
                     packetForwarder?.let { forwarder ->
-                        forwarder.send(forwardPacket)
+                        forwarder.forwardPacket(
+                            sourceNodeId = meshPacket.sourceNodeId,
+                            packet = meshPacket
+                        )
                     } ?: Log.w(TAG, "PacketForwarder not attached yet")
 
                 } catch (e: Exception) {
@@ -100,13 +108,17 @@ class MeshVpnService : VpnService() {
     }
 
     fun writeToTun(packet: ByteArray) {
+        val sourceNodeId = android.os.Build.MODEL ?: "unknown-node"
         try {
-            if (packet.size >= 20) {
-                val rebuilt = IpUdpPacketBuilder.buildResponse(NatEntry.createFromIpPacket(packet), packet)
-                tunOutput?.write(rebuilt)
-            } else {
-                tunOutput?.write(packet)
-            }
+            val rebuilt =
+                if (packet.size >= 20)
+                    IpUdpPacketBuilder.buildResponse(
+                        NatEntry.createFromIpPacket(packet, sourceNodeId),
+                        packet
+                    )
+                else packet
+
+            tunOutput?.write(rebuilt)
         } catch (e: Exception) {
             Log.e(TAG, "TUN write error", e)
         }

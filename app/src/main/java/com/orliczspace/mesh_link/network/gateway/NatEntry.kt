@@ -6,8 +6,10 @@ data class NatEntry(
     val destIp: String,
     val destPort: Int,
     val payload: ByteArray,
-    val sourceNodeId: String
-) {
+    val sourceNodeId: String? = null,
+    val sequence: Long = 0L,   // NEW: unique sequence for reliable delivery
+)
+ {
     companion object {
         fun createFromIpPacket(raw: ByteArray, sourceNodeId: String): NatEntry {
             val ip = IPv4Packet.parse(raw)

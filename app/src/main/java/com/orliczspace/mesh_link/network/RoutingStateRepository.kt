@@ -10,7 +10,6 @@ class RoutingStateRepository(
     companion object {
         private const val RTT_DEGRADATION_THRESHOLD = 1.3
         private const val MAX_DEGRADATION_COUNT = 3
-        private const val RTT_SMOOTHING_ALPHA = 0.3  // EWMA smoothing factor
     }
 
     val routingTable = mutableStateMapOf<String, RoutingState>()
@@ -19,31 +18,21 @@ class RoutingStateRepository(
         nodeId: String,
         hasInternetAccess: Boolean
     ) {
-        val newRttLong = linkProbeService.getAverageRtt(nodeId) ?: return
-        val newRtt = newRttLong.toInt()
-
+        val smoothedRttLong = linkProbeService.getAverageRtt(nodeId) ?: return
+        val smoothedRtt = smoothedRttLong.toInt()
         val stability = linkProbeService.getStability(nodeId)
+
         val oldState = routingTable[nodeId]
-
-        // --- EWMA RTT smoothing ---
-        val smoothedRtt = if (oldState != null) {
-            (RTT_SMOOTHING_ALPHA * newRtt + (1 - RTT_SMOOTHING_ALPHA) * oldState.averageLatencyMs).toInt()
-        } else {
-            newRtt
-        }
-
-        // RTT degradation detection
         val lastRtt = oldState?.averageLatencyMs ?: smoothedRtt
+
         val degradationRatio =
-            if (lastRtt > 0) smoothedRtt.toDouble() / lastRtt.toDouble() else 1.0
+            if (lastRtt > 0) smoothedRtt.toDouble() / lastRtt else 1.0
 
         val degradationCount =
             if (degradationRatio > RTT_DEGRADATION_THRESHOLD)
                 (oldState?.degradationCount ?: 0) + 1
-            else
-                0
+            else 0
 
-        // Stability score normalization
         val stabilityScore = when {
             stability <= 10 -> 100.0
             stability <= 30 -> 80.0
@@ -54,7 +43,7 @@ class RoutingStateRepository(
 
         routingTable[nodeId] = RoutingState(
             nodeId = nodeId,
-            averageLatencyMs = smoothedRtt,
+            averageLatencyMs = max(smoothedRtt, 0),
             lastLatencyMs = lastRtt,
             degradationCount = degradationCount,
             stabilityScore = stabilityScore,
@@ -62,10 +51,7 @@ class RoutingStateRepository(
             isGateway = oldState?.isGateway ?: false
         )
 
-        // 🔥 Adaptive re-election trigger
-        if (oldState?.isGateway == true &&
-            degradationCount >= MAX_DEGRADATION_COUNT
-        ) {
+        if (oldState?.isGateway == true && degradationCount >= MAX_DEGRADATION_COUNT) {
             electGateway()
         }
     }
@@ -75,41 +61,31 @@ class RoutingStateRepository(
     }
 
     fun electGateway(): RoutingState? {
-        val updatedStates = routingTable.values.map { state ->
-            val score = GatewayScorer.score(state)
-            state.copy(
-                gatewayScore = score,
-                degradationCount = 0 // reset after election
+        val updated = routingTable.values.map {
+            it.copy(
+                gatewayScore = GatewayScorer.score(it),
+                degradationCount = 0
             )
         }
 
-        val gateway = updatedStates.maxByOrNull { it.gatewayScore }
+        val gateway = updated.maxByOrNull { it.gatewayScore }
 
         routingTable.clear()
-        updatedStates.forEach { state ->
-            routingTable[state.nodeId] =
-                state.copy(isGateway = state.nodeId == gateway?.nodeId)
+        updated.forEach {
+            routingTable[it.nodeId] =
+                it.copy(isGateway = it.nodeId == gateway?.nodeId)
         }
 
         return gateway
     }
 
     fun getRouteToInternet(localNodeId: String): RouteDecision? {
-        val gateway = routingTable.values.firstOrNull { it.isGateway }
-            ?: return null
+        val gateway = routingTable.values.firstOrNull { it.isGateway } ?: return null
 
         return if (gateway.nodeId == localNodeId) {
-            RouteDecision(
-                destination = "INTERNET",
-                nextHopNodeId = null,
-                viaGateway = false
-            )
+            RouteDecision("INTERNET", null, false)
         } else {
-            RouteDecision(
-                destination = "INTERNET",
-                nextHopNodeId = gateway.nodeId,
-                viaGateway = true
-            )
+            RouteDecision("INTERNET", gateway.nodeId, true)
         }
     }
 }

@@ -10,41 +10,33 @@ import kotlin.math.abs
 
 /**
  * Probe-based link quality + identity discovery service.
- * Maintains smoothed RTT per neighbor (EWMA) for adaptive routing.
+ * Uses EWMA smoothing for RTT to stabilize routing decisions.
  */
 class LinkProbeService(
     private val localNodeId: String,
-    private val listenPort: Int = 8888
+    private val listenPort: Int = 8888,
+    private val smoothingAlpha: Double = 0.2 // EWMA alpha
 ) {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var socket: DatagramSocket? = null
 
-    /* ---------------- STATE ---------------- */
+    /** Smoothed RTT per neighbour (nodeId → EWMA RTT in ms) */
+    private val rttEwma = ConcurrentHashMap<String, Double>()
 
-    // Smoothed RTT per neighbour (nodeId → EWMA RTT in ms)
-    private val smoothedRtt = ConcurrentHashMap<String, Double>()
-
-    // Raw RTT history per neighbour (for stability calculation)
+    /** Raw RTT samples (for optional stats) */
     private val rttHistory = ConcurrentHashMap<String, MutableList<Long>>()
 
-    // Pending probe timestamps (seq → sendTime)
+    /** Active probe timestamps (sequence → sendTime) */
     private val pendingProbes = ConcurrentHashMap<Long, Long>()
 
-    // Known peers discovered via probes (nodeId → IP)
+    /** Known peers discovered via probes (nodeId → IP) */
     private val knownPeers = ConcurrentHashMap<String, String>()
 
     private var sequenceCounter = 0L
 
-    // Callback for adaptive probe scheduler
+    /** Callback when probe response received (adaptive scheduler) */
     var onProbeResponse: ((String) -> Unit)? = null
-
-    companion object {
-        private const val EWMA_ALPHA = 0.2  // smoothing factor
-        private const val MAX_HISTORY = 20   // raw history size
-    }
-
-    /* ---------------- LIFECYCLE ---------------- */
 
     fun start() {
         socket = DatagramSocket(listenPort)
@@ -58,19 +50,19 @@ class LinkProbeService(
         Log.d("LinkProbeService", "Stopped")
     }
 
-    /* ---------------- EXTERNAL API ---------------- */
+    /* ---------------- API ---------------- */
 
     fun getKnownPeers(): Map<String, String> = knownPeers.toMap()
 
-    /** Smoothed RTT in ms for this neighbor */
+    /** Returns EWMA-smoothed RTT in ms */
     fun getAverageRtt(neighbourId: String): Long? =
-        smoothedRtt[neighbourId]?.toLong()
+        rttEwma[neighbourId]?.toLong()
 
-    /** Stability metric (average absolute deviation from smoothed RTT) */
+    /** Measures RTT stability (variance of raw samples) */
     fun getStability(neighbourId: String): Double {
         val history = rttHistory[neighbourId] ?: return 0.0
-        val avgRtt = smoothedRtt[neighbourId] ?: history.average()
-        return history.map { abs(it - avgRtt) }.average()
+        val avg = history.average()
+        return history.map { abs(it - avg) }.average()
     }
 
     /* ---------------- PROBE SEND ---------------- */
@@ -92,21 +84,14 @@ class LinkProbeService(
         scope.launch {
             try {
                 val data = ProbeCodec.encode(message)
-                socket?.send(
-                    DatagramPacket(
-                        data,
-                        data.size,
-                        targetAddress,
-                        targetPort
-                    )
-                )
+                socket?.send(DatagramPacket(data, data.size, targetAddress, targetPort))
             } catch (e: Exception) {
                 Log.e("LinkProbeService", "Send error: ${e.message}")
             }
         }
     }
 
-    /* ---------------- RECEIVE ---------------- */
+    /* ---------------- LISTENING ---------------- */
 
     private fun startListening() {
         scope.launch {
@@ -123,12 +108,7 @@ class LinkProbeService(
         }
     }
 
-    private fun handleMessage(
-        data: ByteArray,
-        length: Int,
-        address: InetAddress,
-        port: Int
-    ) {
+    private fun handleMessage(data: ByteArray, length: Int, address: InetAddress, port: Int) {
         val message = try {
             ProbeCodec.decode(data, length)
         } catch (e: Exception) {
@@ -145,19 +125,15 @@ class LinkProbeService(
             ProbeMessage.Type.RESPONSE -> {
                 registerPeer(message.senderId, address.hostAddress, message.capabilities)
                 recordRtt(message.senderId, message.timestamp, System.currentTimeMillis())
-                onProbeResponse?.invoke(message.senderId)
                 pendingProbes.remove(message.sequence)
+                onProbeResponse?.invoke(message.senderId)
             }
         }
     }
 
-    /* ---------------- RESPONSE SEND ---------------- */
+    /* ---------------- RESPONSE ---------------- */
 
-    private fun sendProbeResponse(
-        request: ProbeMessage,
-        address: InetAddress,
-        port: Int
-    ) {
+    private fun sendProbeResponse(request: ProbeMessage, address: InetAddress, port: Int) {
         val response = ProbeMessage(
             type = ProbeMessage.Type.RESPONSE,
             senderId = localNodeId,
@@ -186,29 +162,23 @@ class LinkProbeService(
         }
     }
 
-    /* ---------------- METRICS ---------------- */
+    /* ---------------- RTT RECORD ---------------- */
 
     private fun recordRtt(neighbourId: String, requestTime: Long, responseTime: Long) {
         val rtt = responseTime - requestTime
-        val history = rttHistory.getOrPut(neighbourId) { mutableListOf() }
 
         // Update raw history
+        val history = rttHistory.getOrPut(neighbourId) { mutableListOf() }
         history.add(rtt)
-        if (history.size > MAX_HISTORY) history.removeAt(0)
+        if (history.size > 20) history.removeAt(0)
 
         // EWMA smoothing
-        val prev = smoothedRtt[neighbourId] ?: rtt.toDouble()
-        val newSmoothed = EWMA_ALPHA * rtt + (1 - EWMA_ALPHA) * prev
-        smoothedRtt[neighbourId] = newSmoothed
+        val oldEwma = rttEwma[neighbourId] ?: rtt.toDouble()
+        val newEwma = smoothingAlpha * rtt + (1 - smoothingAlpha) * oldEwma
+        rttEwma[neighbourId] = newEwma
 
-        Log.d("LinkProbeService", "RTT $neighbourId = ${rtt}ms, smoothed = ${newSmoothed.format(1)}ms")
+        Log.d("LinkProbeService", "RTT $neighbourId = ${rtt}ms (EWMA=${newEwma.toInt()}ms)")
     }
 
-    /* ---------------- CAPABILITIES ---------------- */
-    private fun getCapabilities(): Capabilities {
-        return Capabilities(hasInternet = false)
-    }
-
-    /* ---------------- HELPERS ---------------- */
-    private fun Double.format(digits: Int) = "%.${digits}f".format(this)
+    private fun getCapabilities(): Capabilities = Capabilities(hasInternet = false)
 }

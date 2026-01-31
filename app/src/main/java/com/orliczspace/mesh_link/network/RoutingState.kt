@@ -12,6 +12,8 @@ data class RoutingState(
     val gatewayScore: Double = 0.0,
     val isGateway: Boolean = false,
     val lastLatencyMs: Int = averageLatencyMs,
-    val degradationCount: Int = 0
+    val degradationCount: Int = 0,
+    val ip: String = "127.0.0.1",
+    val port: Int = 12345
 )
 

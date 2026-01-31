@@ -1,12 +1,13 @@
 package com.orliczspace.mesh_link
 
-import android.os.IBinder
+import com.orliczspace.mesh_link.network.gateway.SQLiteFlowLogger
 import android.Manifest
 import android.content.*
 import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -23,13 +24,16 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.orliczspace.mesh_link.network.*
+import com.orliczspace.mesh_link.network.gateway.GatewayNatService
 import com.orliczspace.mesh_link.network.gateway.NatEntry
-import com.orliczspace.mesh_link.network.gateway.SQLiteFlowLogger
+import com.orliczspace.mesh_link.network.packet.MeshPacket
 import com.orliczspace.mesh_link.network.vpn.MeshVpnService
 import com.orliczspace.mesh_link.ui.theme.MeshlinkTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.net.DatagramSocket
 import java.net.InetAddress
+import java.net.InetSocketAddress
 
 class MainActivity : ComponentActivity() {
 
@@ -40,13 +44,13 @@ class MainActivity : ComponentActivity() {
     private var meshVpnService: MeshVpnService? = null
     private lateinit var linkProbeService: LinkProbeService
     private lateinit var routingRepository: RoutingStateRepository
+    private lateinit var gatewayNatService: GatewayNatService
     private lateinit var packetForwarder: PacketForwarder
     private lateinit var internetMonitor: InternetMonitor
     private lateinit var adaptiveProbeScheduler: AdaptiveProbeScheduler
     private var neighbourService: NeighbourDiscoveryService? = null
 
     /* ---------------- VPN SERVICE CONNECTION ---------------- */
-
     private val vpnConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             val service = (binder as MeshVpnService.LocalBinder).getService()
@@ -72,23 +76,33 @@ class MainActivity : ComponentActivity() {
         adaptiveProbeScheduler = AdaptiveProbeScheduler(linkProbeService)
         internetMonitor = InternetMonitor(this)
 
+        // Gateway NAT Service
         val flowLogger = SQLiteFlowLogger(this)
 
-        packetForwarder = PacketForwarder(
-            localNodeId = Build.MODEL ?: "unknown",
-            routingRepository = routingRepository,
-            linkProbeService = linkProbeService,
+        gatewayNatService = GatewayNatService(
             flowLogger = flowLogger,
+            onInboundPacket = { payload ->
+                // NAT → VPN → App
+                meshVpnService?.writeToTun(payload)
+            }
+        )
+
+
+        // PacketForwarder
+        packetForwarder = PacketForwarder(
+            socket = DatagramSocket(),
+            routingRepository = routingRepository,
+            gatewayNatService = gatewayNatService
+        ).apply {
             deliveryListener = object : PacketForwarder.PacketDeliveryListener {
                 override fun onPacketDelivered(payload: ByteArray) {
                     meshVpnService?.writeToTun(payload)
                 }
             }
-        )
+        }
 
         /* ---------------- Permissions & VPN ---------------- */
         setContent {
-
             var hasPermissions by remember { mutableStateOf(checkRequiredPermissions()) }
 
             val permissionLauncher = rememberLauncherForActivityResult(
@@ -117,7 +131,6 @@ class MainActivity : ComponentActivity() {
                 derivedStateOf { routingRepository.routingTable.values.toList() }
             }
 
-            // 🔹 NEW: active NAT / internet flows
             val activeFlows = remember { mutableStateListOf<NatEntry>() }
 
             LaunchedEffect(Unit) {
@@ -190,7 +203,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun getRequiredPermissions(): Array<String> {
-        val permissions = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        val permissions = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
         return permissions.toTypedArray()
     }
@@ -205,7 +221,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-
 /* ---------------- UI COMPOSABLES ---------------- */
 
 @Composable
@@ -214,7 +229,7 @@ fun Dashboard(
     connectionType: String,
     neighbours: List<String>,
     routingStates: List<RoutingState>,
-    activeFlows: List<NatEntry> = emptyList() // Now List<NatEntry>
+    activeFlows: List<NatEntry> = emptyList()
 ) {
     val statusText = if (internetAvailable) "Online" else "Offline"
     val statusColor = if (internetAvailable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
@@ -226,7 +241,7 @@ fun Dashboard(
                 .padding(WindowInsets.statusBars.asPaddingValues())
                 .padding(horizontal = 20.dp, vertical = 20.dp)
         ) {
-
+            // Network status card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
@@ -279,7 +294,7 @@ fun Dashboard(
     }
 }
 
-/* ---------------- UI helpers ---------------- */
+/* ---------------- UI HELPERS ---------------- */
 
 @Composable
 fun StatusChip(label: String, color: androidx.compose.ui.graphics.Color) {
