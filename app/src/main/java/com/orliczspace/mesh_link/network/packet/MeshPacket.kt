@@ -10,7 +10,9 @@ data class MeshPacket(
     val payload: ByteArray,
     val ttl: Int = 8,
     val type: PacketType,
+    val seqNumber: Long = 0L,
     val requiresAck: Boolean = false,
+    val encrypted: Boolean = false,
     val ackForPacketId: String? = null
 ) {
     /** Serialize packet into byte array (simple stub; you can improve encoding later) */

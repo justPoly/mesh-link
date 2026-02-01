@@ -7,5 +7,6 @@ enum class PacketType {
     GATEWAY_ANNOUNCE,
     NAT_FORWARD,
     DATA,
-    ACK
+    ACK,
+    KEY_EXCHANGE
 }

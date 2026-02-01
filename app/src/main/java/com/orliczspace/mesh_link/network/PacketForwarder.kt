@@ -2,9 +2,9 @@ package com.orliczspace.mesh_link.network
 
 import android.util.Log
 import com.orliczspace.mesh_link.network.gateway.GatewayNatService
+import com.orliczspace.mesh_link.network.gateway.NatEntry
 import com.orliczspace.mesh_link.network.packet.MeshPacket
 import com.orliczspace.mesh_link.network.packet.PacketType
-import com.orliczspace.mesh_link.network.security.CryptoManager
 import kotlinx.coroutines.*
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -15,7 +15,8 @@ import java.util.concurrent.ConcurrentHashMap
 class PacketForwarder(
     private val socket: DatagramSocket,
     private val routingRepository: RoutingStateRepository,
-    private val gatewayNatService: GatewayNatService
+    private val gatewayNatService: GatewayNatService,
+    private val meshNetworkManager: MeshNetworkManager // for secure packet sending
 ) {
 
     companion object {
@@ -35,7 +36,7 @@ class PacketForwarder(
     var deliveryListener: PacketDeliveryListener? = null
 
     /**
-     * Forward a packet to the next hop
+     * Forward a packet to the next hop (encrypted automatically if possible)
      */
     suspend fun forward(packet: MeshPacket) {
         if (packet.ttl <= 0) {
@@ -45,10 +46,7 @@ class PacketForwarder(
 
         // NAT forwarding handled separately
         if (packet.type == PacketType.NAT_FORWARD) {
-            gatewayNatService.handleOutbound(
-                packet.payload,
-                packet.sourceNodeId
-            )
+            gatewayNatService.handleOutbound(packet.payload, packet.sourceNodeId)
             return
         }
 
@@ -59,32 +57,27 @@ class PacketForwarder(
                 return
             }
 
-        val encoded = ForwardPacketCodec.encode(packet)
-        val encrypted = CryptoManager.encrypt(encoded)
+        // Use MeshNetworkManager to send securely if session exists
+        if (packet.destinationNodeId != null) {
+            meshNetworkManager.sendSecurePacket(packet.destinationNodeId, packet.payload, packet.type)
+            Log.d(TAG, "Secure packet sent to ${packet.destinationNodeId}")
+            return
+        }
 
-        val datagram = DatagramPacket(
-            encrypted,
-            encrypted.size,
-            InetSocketAddress(nextHop.ip, nextHop.port)
-        )
-
+        // Fallback: raw send if no destination or secure session
+        val targetAddress = InetSocketAddress(nextHop.ip, nextHop.port)
+        val datagram = DatagramPacket(packet.payload, packet.payload.size, targetAddress)
         socket.send(datagram)
-
-        Log.d(TAG, "Packet forwarded to ${nextHop.ip}:${nextHop.port}")
+        Log.d(TAG, "Packet forwarded RAW to ${nextHop.ip}:${nextHop.port}")
     }
 
     /**
      * Called when a UDP datagram is received
      */
-    fun onDatagramReceived(
-        data: ByteArray,
-        length: Int,
-        sender: InetAddress,
-        port: Int
-    ) {
+    fun onDatagramReceived(data: ByteArray, length: Int, sender: InetAddress, port: Int) {
         try {
-            val decrypted = CryptoManager.decrypt(data.copyOf(length))
-            val packet = ForwardPacketCodec.decode(decrypted)
+            // Deserialize using the length parameter
+            val packet = MeshPacket.deserialize(data, length)
 
             // Drop duplicate packets
             if (isDuplicate(packet.packetId)) {
@@ -119,5 +112,10 @@ class PacketForwarder(
 
         // Returns true if packet already exists
         return seenPackets.putIfAbsent(id, now) != null
+    }
+
+    /** Get active internet flows (stub for VPN UI) */
+    fun getActiveInternetFlows(): Map<String, NatEntry> {
+        return gatewayNatService.getActiveFlows()
     }
 }
