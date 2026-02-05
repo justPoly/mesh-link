@@ -1,7 +1,6 @@
 package com.orliczspace.mesh_link.network.gateway
 
 import com.orliczspace.mesh_link.network.packet.MeshPacket
-import com.orliczspace.mesh_link.security.CryptoManager
 import android.util.Log
 import kotlinx.coroutines.*
 import java.net.DatagramPacket
@@ -67,8 +66,7 @@ class GatewayNatService(
 
                     val responsePayload = response.data.copyOf(response.length)
                     val rebuiltPacket = IpUdpPacketBuilder.buildResponse(natEntry, responsePayload)
-                    val encrypted = CryptoManager.encrypt(rebuiltPacket)
-                    onInboundPacket(encrypted)
+                    onInboundPacket(rebuiltPacket)
                 }
                 metrics.rttMs = rtt
                 metrics.success = true

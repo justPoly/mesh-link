@@ -93,10 +93,7 @@ class MeshVpnService : VpnService() {
                     )
 
                     packetForwarder?.let { forwarder ->
-                        forwarder.forwardPacket(
-                            sourceNodeId = meshPacket.sourceNodeId,
-                            packet = meshPacket
-                        )
+                        forwarder.forward(meshPacket)
                     } ?: Log.w(TAG, "PacketForwarder not attached yet")
 
                 } catch (e: Exception) {

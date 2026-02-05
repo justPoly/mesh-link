@@ -15,8 +15,7 @@ import java.util.concurrent.ConcurrentHashMap
 class PacketForwarder(
     private val socket: DatagramSocket,
     private val routingRepository: RoutingStateRepository,
-    private val gatewayNatService: GatewayNatService,
-    private val meshNetworkManager: MeshNetworkManager // for secure packet sending
+    private val gatewayNatService: GatewayNatService
 ) {
 
     companion object {
@@ -24,9 +23,10 @@ class PacketForwarder(
         private const val DEDUP_WINDOW_MS = 10_000L
     }
 
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    /** 🔴 Injected AFTER construction */
+    lateinit var meshNetworkManager: MeshNetworkManager
 
-    // Packet de-duplication cache
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val seenPackets = ConcurrentHashMap<String, Long>()
 
     interface PacketDeliveryListener {
@@ -35,16 +35,9 @@ class PacketForwarder(
 
     var deliveryListener: PacketDeliveryListener? = null
 
-    /**
-     * Forward a packet to the next hop (encrypted automatically if possible)
-     */
     suspend fun forward(packet: MeshPacket) {
-        if (packet.ttl <= 0) {
-            Log.d(TAG, "Packet dropped: TTL expired")
-            return
-        }
+        if (packet.ttl <= 0) return
 
-        // NAT forwarding handled separately
         if (packet.type == PacketType.NAT_FORWARD) {
             gatewayNatService.handleOutbound(packet.payload, packet.sourceNodeId)
             return
@@ -52,70 +45,47 @@ class PacketForwarder(
 
         val nextHop = packet.destinationNodeId
             ?.let { routingRepository.routingTable[it] }
-            ?: run {
-                Log.w(TAG, "No route to destination ${packet.destinationNodeId}")
-                return
-            }
+            ?: return
 
-        // Use MeshNetworkManager to send securely if session exists
         if (packet.destinationNodeId != null) {
-            meshNetworkManager.sendSecurePacket(packet.destinationNodeId, packet.payload, packet.type)
-            Log.d(TAG, "Secure packet sent to ${packet.destinationNodeId}")
+            meshNetworkManager.sendSecurePacket(
+                packet.destinationNodeId,
+                packet.payload,
+                packet.type
+            )
             return
         }
 
-        // Fallback: raw send if no destination or secure session
-        val targetAddress = InetSocketAddress(nextHop.ip, nextHop.port)
-        val datagram = DatagramPacket(packet.payload, packet.payload.size, targetAddress)
-        socket.send(datagram)
-        Log.d(TAG, "Packet forwarded RAW to ${nextHop.ip}:${nextHop.port}")
+        val target = InetSocketAddress(nextHop.ip, nextHop.port)
+        socket.send(DatagramPacket(packet.payload, packet.payload.size, target))
     }
 
-    /**
-     * Called when a UDP datagram is received
-     */
     fun onDatagramReceived(data: ByteArray, length: Int, sender: InetAddress, port: Int) {
         try {
-            // Deserialize using the length parameter
             val packet = MeshPacket.deserialize(data, length)
 
-            // Drop duplicate packets
-            if (isDuplicate(packet.packetId)) {
-                Log.d(TAG, "Duplicate packet dropped: ${packet.packetId}")
-                return
-            }
+            if (isDuplicate(packet.packetId)) return
 
-            // Packet is for this node
             if (packet.destinationNodeId == android.os.Build.MODEL) {
                 deliveryListener?.onPacketDelivered(packet.payload)
                 return
             }
 
-            // Forward packet with decremented TTL
             scope.launch {
                 forward(packet.copy(ttl = packet.ttl - 1))
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to process incoming packet", e)
+            Log.e(TAG, "Datagram error", e)
         }
     }
 
-    /**
-     * Packet de-duplication logic
-     */
     private fun isDuplicate(id: String): Boolean {
         val now = System.currentTimeMillis()
-
-        // Cleanup old entries
         seenPackets.entries.removeIf { now - it.value > DEDUP_WINDOW_MS }
-
-        // Returns true if packet already exists
         return seenPackets.putIfAbsent(id, now) != null
     }
 
-    /** Get active internet flows (stub for VPN UI) */
-    fun getActiveInternetFlows(): Map<String, NatEntry> {
-        return gatewayNatService.getActiveFlows()
-    }
+    fun getActiveInternetFlows(): Map<String, NatEntry> =
+        gatewayNatService.getActiveFlows()
 }

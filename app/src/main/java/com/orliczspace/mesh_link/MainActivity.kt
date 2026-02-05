@@ -1,6 +1,5 @@
 package com.orliczspace.mesh_link
 
-import com.orliczspace.mesh_link.network.gateway.SQLiteFlowLogger
 import android.Manifest
 import android.content.*
 import android.content.pm.PackageManager
@@ -25,38 +24,42 @@ import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.orliczspace.mesh_link.network.*
 import com.orliczspace.mesh_link.network.gateway.GatewayNatService
+import com.orliczspace.mesh_link.network.gateway.SQLiteFlowLogger
 import com.orliczspace.mesh_link.network.gateway.NatEntry
-import com.orliczspace.mesh_link.network.packet.MeshPacket
 import com.orliczspace.mesh_link.network.vpn.MeshVpnService
 import com.orliczspace.mesh_link.ui.theme.MeshlinkTheme
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.net.DatagramSocket
-import java.net.InetAddress
-import java.net.InetSocketAddress
 
 class MainActivity : ComponentActivity() {
 
     companion object {
         private const val VPN_REQUEST_CODE = 1001
+        private const val TAG = "MainActivity"
     }
 
+    /* ---------- Core runtime services ---------- */
+
     private var meshVpnService: MeshVpnService? = null
+    private lateinit var packetForwarder: PacketForwarder
+    private lateinit var meshNetworkManager: MeshNetworkManager
+
     private lateinit var linkProbeService: LinkProbeService
     private lateinit var routingRepository: RoutingStateRepository
     private lateinit var gatewayNatService: GatewayNatService
-    private lateinit var packetForwarder: PacketForwarder
     private lateinit var internetMonitor: InternetMonitor
     private lateinit var adaptiveProbeScheduler: AdaptiveProbeScheduler
     private var neighbourService: NeighbourDiscoveryService? = null
 
-    /* ---------------- VPN SERVICE CONNECTION ---------------- */
+    /* ---------- VPN SERVICE CONNECTION ---------- */
+
     private val vpnConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             val service = (binder as MeshVpnService.LocalBinder).getService()
             meshVpnService = service
-            meshVpnService?.attachPacketForwarder(packetForwarder)
-            Log.d("MainActivity", "MeshVpnService connected")
+
+            service.attachPacketForwarder(packetForwarder)
+            Log.d(TAG, "PacketForwarder attached to VPN service")
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -68,49 +71,59 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
 
-        // ---------------- Core services ----------------
-        linkProbeService = LinkProbeService(Build.MODEL ?: "unknown-node")
-        linkProbeService.start()
+        /* ---------- Core initialization (CORRECT ORDER) ---------- */
 
-        routingRepository = RoutingStateRepository(linkProbeService)
+        val localNodeId = Build.MODEL ?: "unknown-node"
+
+        linkProbeService = LinkProbeService(localNodeId).apply { start() }
         adaptiveProbeScheduler = AdaptiveProbeScheduler(linkProbeService)
+        routingRepository = RoutingStateRepository(linkProbeService)
         internetMonitor = InternetMonitor(this)
 
-        // Gateway NAT Service
         val flowLogger = SQLiteFlowLogger(this)
 
         gatewayNatService = GatewayNatService(
             flowLogger = flowLogger,
             onInboundPacket = { payload ->
-                // NAT → VPN → App
                 meshVpnService?.writeToTun(payload)
             }
         )
 
+        val socket = DatagramSocket()
 
-        // PacketForwarder
+        // 1️⃣ Create PacketForwarder FIRST
         packetForwarder = PacketForwarder(
-            socket = DatagramSocket(),
+            socket = socket,
             routingRepository = routingRepository,
             gatewayNatService = gatewayNatService
-        ).apply {
-            deliveryListener = object : PacketForwarder.PacketDeliveryListener {
-                override fun onPacketDelivered(payload: ByteArray) {
-                    meshVpnService?.writeToTun(payload)
-                }
-            }
-        }
+        )
 
-        /* ---------------- Permissions & VPN ---------------- */
+        // 2️⃣ Create MeshNetworkManager
+        meshNetworkManager = MeshNetworkManager(
+            localNodeId = localNodeId,
+            socket = socket,
+            packetForwarder = packetForwarder
+        )
+
+        // 3️⃣ Inject MeshNetworkManager into PacketForwarder
+        packetForwarder.meshNetworkManager = meshNetworkManager
+
+        /* ---------- UI ---------- */
+
         setContent {
             var hasPermissions by remember { mutableStateOf(checkRequiredPermissions()) }
 
-            val permissionLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestMultiplePermissions()
-            ) { hasPermissions = checkRequiredPermissions() }
+            val permissionLauncher =
+                rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestMultiplePermissions()
+                ) {
+                    hasPermissions = checkRequiredPermissions()
+                }
 
             LaunchedEffect(Unit) {
-                if (!hasPermissions) permissionLauncher.launch(getRequiredPermissions())
+                if (!hasPermissions) {
+                    permissionLauncher.launch(getRequiredPermissions())
+                }
             }
 
             LaunchedEffect(hasPermissions) {
@@ -122,11 +135,9 @@ class MainActivity : ComponentActivity() {
 
             val isConnected by internetMonitor.isConnected
             val connectionType by internetMonitor.connectionType
-
             val discoveredPeers by remember {
                 derivedStateOf { neighbourService?.discoveredPeers ?: emptyList() }
             }
-
             val routingStates by remember {
                 derivedStateOf { routingRepository.routingTable.values.toList() }
             }
@@ -134,11 +145,13 @@ class MainActivity : ComponentActivity() {
             val activeFlows = remember { mutableStateListOf<NatEntry>() }
 
             LaunchedEffect(Unit) {
-                val scope = this
                 while (true) {
                     activeFlows.clear()
-                    activeFlows.addAll(packetForwarder.getActiveInternetFlows().values)
-                    delay(1000)
+                    packetForwarder
+                        .getActiveInternetFlows()
+                        .values
+                        .let { activeFlows.addAll(it) }
+                    delay(1_000)
                 }
             }
 
@@ -152,26 +165,22 @@ class MainActivity : ComponentActivity() {
                         activeFlows = activeFlows
                     )
                 } else {
-                    PermissionRequiredScreen { permissionLauncher.launch(getRequiredPermissions()) }
+                    PermissionRequiredScreen {
+                        permissionLauncher.launch(getRequiredPermissions())
+                    }
                 }
             }
         }
-
-        /* ---------------- Discovery ---------------- */
-        if (checkRequiredPermissions()) startNeighbourDiscovery()
     }
 
-    private fun startNeighbourDiscovery() {
-        neighbourService = NeighbourDiscoveryService(this)
-        neighbourService?.startDiscovery()
+    /* ---------- Networking ---------- */
 
-        neighbourService?.connectedPeers?.forEach { (nodeId, ip) ->
-            routingRepository.updateNode(nodeId, hasInternetAccess = false)
-            adaptiveProbeScheduler.startProbing(nodeId, InetAddress.getByName(ip))
+    private fun startNeighbourDiscovery() {
+        neighbourService = NeighbourDiscoveryService(this).apply {
+            startDiscovery()
         }
     }
 
-    /* ---------------- VPN helpers ---------------- */
     private fun startMeshVpn() {
         val intent = VpnService.prepare(this)
         if (intent != null) startActivityForResult(intent, VPN_REQUEST_CODE)
@@ -186,20 +195,33 @@ class MainActivity : ComponentActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == VPN_REQUEST_CODE && resultCode == RESULT_OK) startVpnService()
+        if (requestCode == VPN_REQUEST_CODE && resultCode == RESULT_OK) {
+            startVpnService()
+        }
     }
 
-    /* ---------------- Permissions helpers ---------------- */
+    /* ---------- Permissions ---------- */
+
     private fun checkRequiredPermissions(): Boolean {
-        val fineLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED
-        val coarseLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED
-        val nearbyDevices = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) ==
-                    PackageManager.PERMISSION_GRANTED
-        } else true
-        return fineLocation && coarseLocation && nearbyDevices
+        val fine = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val coarse = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val nearby =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.NEARBY_WIFI_DEVICES
+                ) == PackageManager.PERMISSION_GRANTED
+            } else true
+
+        return fine && coarse && nearby
     }
 
     private fun getRequiredPermissions(): Array<String> {
@@ -207,7 +229,9 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
         )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }
         return permissions.toTypedArray()
     }
 
@@ -220,6 +244,7 @@ class MainActivity : ComponentActivity() {
         unbindService(vpnConnection)
     }
 }
+
 
 /* ---------------- UI COMPOSABLES ---------------- */
 
@@ -241,7 +266,6 @@ fun Dashboard(
                 .padding(WindowInsets.statusBars.asPaddingValues())
                 .padding(horizontal = 20.dp, vertical = 20.dp)
         ) {
-            // Network status card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
@@ -259,7 +283,6 @@ fun Dashboard(
             }
 
             Spacer(Modifier.height(28.dp))
-
             SectionCard(title = "Nearby Nodes") {
                 if (neighbours.isEmpty()) EmptyState("No nearby nodes found")
                 else neighbours.forEach { node ->
@@ -270,7 +293,6 @@ fun Dashboard(
             }
 
             Spacer(Modifier.height(28.dp))
-
             SectionCard(title = "Routing State") {
                 if (routingStates.isEmpty()) EmptyState("No routing data available")
                 else routingStates.forEach { state ->
@@ -281,7 +303,6 @@ fun Dashboard(
             }
 
             Spacer(Modifier.height(28.dp))
-
             SectionCard(title = "Active Internet Flows") {
                 if (activeFlows.isEmpty()) EmptyState("No nodes currently using internet")
                 else activeFlows.forEach { entry ->
@@ -295,7 +316,6 @@ fun Dashboard(
 }
 
 /* ---------------- UI HELPERS ---------------- */
-
 @Composable
 fun StatusChip(label: String, color: androidx.compose.ui.graphics.Color) {
     Surface(shape = MaterialTheme.shapes.large, color = color.copy(alpha = 0.12f)) {

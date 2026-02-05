@@ -7,6 +7,7 @@ data class NatEntry(
     val destPort: Int,
     val payload: ByteArray,
     val sourceNodeId: String? = null,
+    var lastActivityAt: Long = System.currentTimeMillis(),
     val sequence: Long = 0L,   // NEW: unique sequence for reliable delivery
 )
  {
