@@ -1,4 +1,4 @@
-package com.orliczspace.mesh_link.ui.mapper
+package com.orliczspace.mesh_link.ui.legacy
 
 import com.orliczspace.mesh_link.network.gateway.NatEntry
 import com.orliczspace.mesh_link.ui.model.UiFlow

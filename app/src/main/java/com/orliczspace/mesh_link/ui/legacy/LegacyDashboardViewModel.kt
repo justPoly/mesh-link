@@ -1,4 +1,4 @@
-package com.orliczspace.mesh_link.ui.viewmodel
+package com.orliczspace.mesh_link.ui.legacy
 
 import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow

@@ -1,4 +1,4 @@
-package com.orliczspace.mesh_link.ui.theme
+package com.orliczspace.mesh_link.ui.legacy
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle

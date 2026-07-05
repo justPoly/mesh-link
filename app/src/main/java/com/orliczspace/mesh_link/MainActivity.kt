@@ -27,7 +27,7 @@ import com.orliczspace.mesh_link.network.gateway.GatewayNatService
 import com.orliczspace.mesh_link.network.gateway.SQLiteFlowLogger
 import com.orliczspace.mesh_link.network.gateway.NatEntry
 import com.orliczspace.mesh_link.network.vpn.MeshVpnService
-import com.orliczspace.mesh_link.ui.theme.MeshlinkTheme
+import com.orliczspace.mesh_link.ui.legacy.MeshlinkTheme
 import kotlinx.coroutines.delay
 import java.net.DatagramSocket
 

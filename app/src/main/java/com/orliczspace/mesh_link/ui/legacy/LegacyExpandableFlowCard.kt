@@ -1,4 +1,4 @@
-package com.orliczspace.mesh_link.ui.components
+package com.orliczspace.mesh_link.ui.legacy
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*

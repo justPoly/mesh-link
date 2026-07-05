@@ -7,7 +7,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.orliczspace.mesh_link.network.RoutingState
-import com.orliczspace.mesh_link.ui.components.*
+import com.orliczspace.mesh_link.ui.legacy.ErrorBanner
+import com.orliczspace.mesh_link.ui.legacy.ExpandableFlowCard
+import com.orliczspace.mesh_link.ui.legacy.RoutingStateCard
+import com.orliczspace.mesh_link.ui.legacy.SectionCard
 import com.orliczspace.mesh_link.ui.model.UiFlow
 
 @Composable

@@ -1,4 +1,4 @@
-package com.orliczspace.mesh_link.ui.screen
+package com.orliczspace.mesh_link.ui.legacy
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
