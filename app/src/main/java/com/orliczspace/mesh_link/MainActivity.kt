@@ -22,12 +22,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.orliczspace.mesh_link.ui.screen.permission.PermissionScreen
 import com.orliczspace.mesh_link.network.*
 import com.orliczspace.mesh_link.network.gateway.GatewayNatService
 import com.orliczspace.mesh_link.network.gateway.SQLiteFlowLogger
 import com.orliczspace.mesh_link.network.gateway.NatEntry
 import com.orliczspace.mesh_link.network.vpn.MeshVpnService
 import com.orliczspace.mesh_link.ui.legacy.MeshlinkTheme
+import com.orliczspace.mesh_link.ui.navigation.MeshNavGraph
 import kotlinx.coroutines.delay
 import java.net.DatagramSocket
 
@@ -133,42 +135,24 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            val isConnected by internetMonitor.isConnected
-            val connectionType by internetMonitor.connectionType
-            val discoveredPeers by remember {
-                derivedStateOf { neighbourService?.discoveredPeers ?: emptyList() }
-            }
-            val routingStates by remember {
-                derivedStateOf { routingRepository.routingTable.values.toList() }
-            }
-
-            val activeFlows = remember { mutableStateListOf<NatEntry>() }
-
-            LaunchedEffect(Unit) {
-                while (true) {
-                    activeFlows.clear()
-                    packetForwarder
-                        .getActiveInternetFlows()
-                        .values
-                        .let { activeFlows.addAll(it) }
-                    delay(1_000)
-                }
-            }
-
             MeshlinkTheme {
+
                 if (hasPermissions) {
-                    Dashboard(
-                        internetAvailable = isConnected,
-                        connectionType = connectionType,
-                        neighbours = discoveredPeers,
-                        routingStates = routingStates,
-                        activeFlows = activeFlows
-                    )
+
+                    MeshNavGraph()
+
                 } else {
-                    PermissionRequiredScreen {
-                        permissionLauncher.launch(getRequiredPermissions())
+
+                    PermissionScreen {
+
+                        permissionLauncher.launch(
+                            getRequiredPermissions()
+                        )
+
                     }
+
                 }
+
             }
         }
     }
@@ -245,132 +229,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-
 /* ---------------- UI COMPOSABLES ---------------- */
 
-@Composable
-fun Dashboard(
-    internetAvailable: Boolean,
-    connectionType: String,
-    neighbours: List<String>,
-    routingStates: List<RoutingState>,
-    activeFlows: List<NatEntry> = emptyList()
-) {
-    val statusText = if (internetAvailable) "Online" else "Offline"
-    val statusColor = if (internetAvailable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
 
-    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(WindowInsets.statusBars.asPaddingValues())
-                .padding(horizontal = 20.dp, vertical = 20.dp)
-        ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-            ) {
-                Column(modifier = Modifier.padding(24.dp)) {
-                    Text("MeshLink", style = MaterialTheme.typography.headlineMedium)
-                    Spacer(Modifier.height(6.dp))
-                    Text("Decentralized mobile mesh network", style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.height(16.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        StatusChip(statusText, statusColor)
-                        StatusChip(connectionType, MaterialTheme.colorScheme.secondary)
-                    }
-                }
-            }
 
-            Spacer(Modifier.height(28.dp))
-            SectionCard(title = "Nearby Nodes") {
-                if (neighbours.isEmpty()) EmptyState("No nearby nodes found")
-                else neighbours.forEach { node ->
-                    AnimatedVisibility(visible = true, enter = fadeIn() + expandVertically()) {
-                        ListRow(node)
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(28.dp))
-            SectionCard(title = "Routing State") {
-                if (routingStates.isEmpty()) EmptyState("No routing data available")
-                else routingStates.forEach { state ->
-                    AnimatedVisibility(visible = true, enter = fadeIn() + expandVertically()) {
-                        RoutingStateCard(state)
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(28.dp))
-            SectionCard(title = "Active Internet Flows") {
-                if (activeFlows.isEmpty()) EmptyState("No nodes currently using internet")
-                else activeFlows.forEach { entry ->
-                    AnimatedVisibility(visible = true, enter = fadeIn() + expandVertically()) {
-                        ListRow("${entry.sourceNodeId} → ${entry.destIp}:${entry.destPort}")
-                    }
-                }
-            }
-        }
-    }
-}
-
-/* ---------------- UI HELPERS ---------------- */
-@Composable
-fun StatusChip(label: String, color: androidx.compose.ui.graphics.Color) {
-    Surface(shape = MaterialTheme.shapes.large, color = color.copy(alpha = 0.12f)) {
-        Text(text = label, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), color = color)
-    }
-}
-
-@Composable
-fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(18.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(12.dp))
-            content()
-        }
-    }
-}
-
-@Composable
-fun EmptyState(text: String) {
-    Text(text, style = MaterialTheme.typography.bodyMedium)
-}
-
-@Composable
-fun ListRow(title: String) {
-    Row(modifier = Modifier.padding(vertical = 6.dp)) {
-        Text("• ", modifier = Modifier.padding(end = 6.dp))
-        Text(title)
-    }
-}
-
-@Composable
-fun RoutingStateCard(state: RoutingState) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(state.nodeId, style = MaterialTheme.typography.bodyLarge)
-            Spacer(Modifier.height(6.dp))
-            Text("Latency: ${state.averageLatencyMs} ms")
-            Text("Stability: ${state.stabilityScore.toInt()}%")
-        }
-    }
-}
-
-@Composable
-fun PermissionRequiredScreen(onRequestPermission: () -> Unit) {
-    Surface(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.padding(32.dp), verticalArrangement = Arrangement.Center) {
-            Text("Permission Required", style = MaterialTheme.typography.headlineMedium)
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("MeshLink needs location and nearby devices permission to discover nearby phones.")
-            Spacer(modifier = Modifier.height(32.dp))
-            Button(onClick = onRequestPermission) { Text("Grant Permission") }
-        }
-    }
-}
