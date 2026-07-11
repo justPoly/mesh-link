@@ -2,32 +2,48 @@ package com.orliczspace.mesh_link.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-/* Brand */
+// Primary Branding
 
-val MeshGreen = Color(0xFF20D67B)
-val MeshBlue = Color(0xFF42A5F5)
-val MeshOrange = Color(0xFFFFB74D)
-val MeshRed = Color(0xFFEF5350)
+val MeshGreen = Color(0xFF2ED573)
 
-/* Light */
+val MeshGreenDark = Color(0xFF22C55E)
+
+val MeshBlue = Color(0xFF4DA3FF)
+
+// Background
+
+val BackgroundDark = Color(0xFF0B0F14)
 
 val BackgroundLight = Color(0xFFF5F7FA)
-val SurfaceLight = Color.White
+
+// Cards
+
+val CardDark = Color(0xFF151A22)
+
 val CardLight = Color(0xFFFFFFFF)
 
-/* Dark */
+// Text
 
-val BackgroundDark = Color(0xFF081018)
-val SurfaceDark = Color(0xFF111C28)
-val CardDark = Color(0xFF162231)
+val TextPrimaryDark = Color.White
 
-/* Text */
+val TextSecondaryDark = Color(0xFFB0B6C3)
 
-val TextPrimary = Color.White
-val TextSecondary = Color(0xFFBFC9D4)
+val TextPrimaryLight = Color(0xFF1A1A1A)
 
-/* Status */
+val TextSecondaryLight = Color(0xFF6B7280)
 
-val Success = Color(0xFF4CAF50)
-val Warning = Color(0xFFFF9800)
-val Error = Color(0xFFF44336)
+// Status
+
+val Online = MeshGreen
+
+val Offline = Color(0xFFFF5E57)
+
+val Warning = Color(0xFFFFB800)
+
+val Success = MeshGreen
+
+// Misc
+
+val DividerDark = Color(0xFF2C3440)
+
+val DividerLight = Color(0xFFE4E7EB)

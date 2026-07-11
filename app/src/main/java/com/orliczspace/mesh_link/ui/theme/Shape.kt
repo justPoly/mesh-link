@@ -2,18 +2,16 @@ package com.orliczspace.mesh_link.ui.theme
 
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Shapes
-import androidx.compose.ui.unit.dp
 
 val Shapes = Shapes(
 
-    extraSmall = RoundedCornerShape(6.dp),
+    extraSmall = RoundedCornerShape(6),
 
-    small = RoundedCornerShape(10.dp),
+    small = RoundedCornerShape(12),
 
-    medium = RoundedCornerShape(16.dp),
+    medium = RoundedCornerShape(20),
 
-    large = RoundedCornerShape(24.dp),
+    large = RoundedCornerShape(24),
 
-    extraLarge = RoundedCornerShape(30.dp)
-
+    extraLarge = RoundedCornerShape(32)
 )

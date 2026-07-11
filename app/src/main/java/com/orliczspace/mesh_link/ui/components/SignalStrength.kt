@@ -2,8 +2,6 @@ package com.orliczspace.mesh_link.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -12,34 +10,32 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun SignalStrength(
-    strength: Int,
-    modifier: Modifier = Modifier
+    percentage: Int
 ) {
-    val bars = 4
 
     Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(3.dp)
+        verticalAlignment = Alignment.Bottom
     ) {
 
-        repeat(bars) { index ->
+        repeat(5) { index ->
 
-            val active = index < strength
+            val active = percentage > index * 20
 
             Box(
                 modifier = Modifier
-                    .width(6.dp)
-                    .height((8 + index * 5).dp)
+                    .padding(end = 3.dp)
+                    .width(5.dp)
+                    .height((10 + index * 6).dp)
                     .background(
                         if (active)
-                            MaterialTheme.colorScheme.primary
+                            Color.Green
                         else
-                            Color.Gray.copy(alpha = 0.25f),
-                        RoundedCornerShape(2.dp)
+                            Color.Gray
                     )
             )
 
         }
+
     }
+
 }

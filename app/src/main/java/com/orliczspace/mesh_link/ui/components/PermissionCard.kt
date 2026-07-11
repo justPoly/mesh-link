@@ -2,32 +2,30 @@ package com.orliczspace.mesh_link.ui.components
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Router
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 
 @Composable
-fun NodeCard(
-    nodeName: String,
-    signal: Int,
-    distance: String,
-    onClick: () -> Unit
+fun PermissionCard(
+    title: String,
+    description: String,
+    granted: Boolean
 ) {
 
     MeshCard {
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
 
             Icon(
-                Icons.Default.Router,
-                null,
-                tint = MaterialTheme.colorScheme.primary
+                Icons.Default.LocationOn,
+                null
             )
 
             Spacer(Modifier.width(12.dp))
@@ -36,22 +34,24 @@ fun NodeCard(
                 modifier = Modifier.weight(1f)
             ) {
 
-                Text(nodeName)
+                Text(title)
 
                 Text(
-                    "$distance • Signal $signal%",
+                    description,
                     style = MaterialTheme.typography.bodySmall
                 )
 
             }
 
-            Button(
-                onClick = onClick
-            ) {
-
-                Text("Connect")
-
-            }
+            Icon(
+                Icons.Default.CheckCircle,
+                null,
+                tint =
+                if (granted)
+                    MaterialTheme.colorScheme.primary
+                else
+                    MaterialTheme.colorScheme.error
+            )
 
         }
 

@@ -11,47 +11,46 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun StatusCard(
-
-    online: Boolean,
-
-    connectionType: String
-
+    status: String,
+    online: Boolean
 ) {
 
-    DashboardCard {
+    MeshCard {
 
         Row(
-
-            verticalAlignment = Alignment.CenterVertically,
-
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-
-            modifier = Modifier.fillMaxWidth()
-
+            verticalAlignment = Alignment.CenterVertically
         ) {
 
             Column {
 
                 Text(
-
-                    if (online) "Online"
-
-                    else "Offline",
-
-                    style = MaterialTheme.typography.headlineMedium
-
+                    "Status",
+                    style = MaterialTheme.typography.titleMedium
                 )
 
-                Text(connectionType)
+                Spacer(Modifier.height(8.dp))
+
+                Text(
+                    status,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = if (online)
+                        MaterialTheme.colorScheme.primary
+                    else
+                        MaterialTheme.colorScheme.error
+                )
 
             }
 
             Icon(
-
                 Icons.Default.Wifi,
-
-                contentDescription = null
-
+                null,
+                tint = if (online)
+                    MaterialTheme.colorScheme.primary
+                else
+                    MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(52.dp)
             )
 
         }

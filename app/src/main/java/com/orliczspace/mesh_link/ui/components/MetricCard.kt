@@ -1,30 +1,41 @@
 package com.orliczspace.mesh_link.ui.components
 
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
 @Composable
 fun MetricCard(
     title: String,
-    value: String
+    value: String,
+    icon: ImageVector
 ) {
-    DashboardCard {
+
+    MeshCard {
+
+        Icon(
+            icon,
+            null,
+            tint = MaterialTheme.colorScheme.primary
+        )
+
+        Spacer(Modifier.height(10.dp))
 
         Text(
-            text = title,
+            title,
             style = MaterialTheme.typography.bodyMedium
         )
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
 
         Text(
-            text = value,
-            style = MaterialTheme.typography.headlineMedium
+            value,
+            style = MaterialTheme.typography.headlineSmall
         )
+
     }
+
 }
