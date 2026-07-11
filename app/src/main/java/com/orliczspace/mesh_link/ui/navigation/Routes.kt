@@ -2,19 +2,27 @@ package com.orliczspace.mesh_link.ui.navigation
 
 sealed class Routes(val route: String) {
 
-    object Dashboard : Routes("dashboard")
+    data object Splash : Routes("splash")
 
-    object Discovery : Routes("discovery")
+    data object Welcome : Routes("welcome")
 
-    object Nodes : Routes("nodes")
+    data object Login : Routes("login")
 
-    object Topology : Routes("topology")
+    data object Permission : Routes("permission")
 
-    object Routing : Routes("routing")
+    data object Dashboard : Routes("dashboard")
 
-    object Connected : Routes("connected")
+    data object Discovery : Routes("discovery")
 
-    object Performance : Routes("performance")
+    data object Nodes : Routes("nodes")
 
-    object Settings : Routes("settings")
+    data object Topology : Routes("topology")
+
+    data object Routing : Routes("routing")
+
+    data object Connected : Routes("connected")
+
+    data object Performance : Routes("performance")
+
+    data object Settings : Routes("settings")
 }
