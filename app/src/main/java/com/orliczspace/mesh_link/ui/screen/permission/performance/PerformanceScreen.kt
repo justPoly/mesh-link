@@ -5,9 +5,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.navigation.NavHostController
 
 @Composable
-fun PerformanceScreen() {
+fun PerformanceScreen(padding: NavHostController) {
 
     Box(
         modifier = Modifier.fillMaxSize(),

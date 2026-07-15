@@ -1,49 +1,44 @@
 package com.orliczspace.mesh_link.ui.screen.dashboard
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.NetworkWifi
-import androidx.compose.material.icons.filled.Route
-import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.Wifi
-import androidx.compose.material3.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import com.orliczspace.mesh_link.ui.components.*
+import androidx.navigation.NavHostController
+
+import com.orliczspace.mesh_link.ui.navigation.Routes
+import com.orliczspace.mesh_link.ui.scaffold.MeshScaffold
 
 @Composable
-fun DashboardScreen() {
+fun DashboardScreen(
+    navController: NavHostController
+) {
+
+    MeshScaffold(
+        title = "Dashboard",
+        navController = navController,
+        currentRoute = Routes.Dashboard.route
+    ) { padding ->
+
+        DashboardContent(padding)
+
+    }
+}
+
+@Composable
+private fun DashboardContent(
+    padding: PaddingValues
+) {
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp)
+            .padding(padding)
     ) {
 
-        DashboardHeader()
-
-        Spacer(Modifier.height(24.dp))
-
-        StatusCard(
-            status = "Connected",
-            online = true
-        )
-
-        Spacer(Modifier.height(24.dp))
-
-        QuickActionsSection()
-
-        Spacer(Modifier.height(24.dp))
-
-        MetricsSection()
-
-        Spacer(Modifier.height(24.dp))
-
-        NearbyNodesSection()
+        // We'll build the real dashboard here later.
 
     }
 

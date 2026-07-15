@@ -1,19 +1,34 @@
-package com.orliczspace.mesh_link.ui.screen.topology
+package com.orliczspace.mesh_link.ui.screen.permission.topology
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
+import androidx.navigation.NavHostController
+
+import com.orliczspace.mesh_link.ui.navigation.Routes
+import com.orliczspace.mesh_link.ui.scaffold.MeshScaffold
 
 @Composable
-fun TopologyScreen() {
+fun TopologyScreen(
+    navController: NavHostController
+) {
 
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
+    MeshScaffold(
+        title = "Topology",
+        navController = navController,
+        currentRoute = Routes.Topology.route
+    ) { padding ->
 
-        Text("Mesh Topology")
+        TopologyContent(padding)
+
     }
+
+}
+
+@Composable
+private fun TopologyContent(
+    padding: PaddingValues
+) {
+
+    // Placeholder
+
 }

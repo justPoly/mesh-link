@@ -1,19 +1,39 @@
-package com.orliczspace.mesh_link.ui.screen.settings
+package com.orliczspace.mesh_link.ui.screen.permission.settings
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.navigation.NavHostController
+
+import com.orliczspace.mesh_link.ui.navigation.Routes
+import com.orliczspace.mesh_link.ui.scaffold.MeshScaffold
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(
+    navController: NavHostController
+) {
 
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
+    MeshScaffold(
+        title = "Settings",
+        navController = navController,
+        currentRoute = Routes.Settings.route
+    ) { padding ->
 
-        Text("Settings")
+        SettingsContent(padding)
+
     }
+
+}
+
+@Composable
+private fun SettingsContent(
+    padding: PaddingValues
+) {
+
+    // Placeholder
+
 }

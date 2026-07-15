@@ -1,19 +1,39 @@
-package com.orliczspace.mesh_link.ui.screen.nodes
+package com.orliczspace.mesh_link.ui.screen.permission.discovery
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.navigation.NavHostController
+
+import com.orliczspace.mesh_link.ui.navigation.Routes
+import com.orliczspace.mesh_link.ui.scaffold.MeshScaffold
 
 @Composable
-fun AvailableNodesScreen() {
+fun AvailableNodesScreen(
+    navController: NavHostController
+) {
 
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
+    MeshScaffold(
+        title = "Available Nodes",
+        navController = navController,
+        currentRoute = Routes.Nodes.route
+    ) { padding ->
 
-        Text("Available Nodes")
+        AvailableNodesContent(padding)
+
     }
+
+}
+
+@Composable
+private fun AvailableNodesContent(
+    padding: PaddingValues
+) {
+
+    // Placeholder
+
 }
