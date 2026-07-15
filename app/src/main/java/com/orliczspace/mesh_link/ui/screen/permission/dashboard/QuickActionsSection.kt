@@ -1,36 +1,68 @@
-package com.orliczspace.mesh_link.ui.screen.dashboard
+package com.orliczspace.mesh_link.ui.screen.permission.dashboard
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Route
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.orliczspace.mesh_link.ui.components.QuickActionCard
+import com.orliczspace.mesh_link.ui.components.card.QuickActionCard
 
 @Composable
 fun QuickActionsSection() {
 
-    Text(
-        "Quick Actions",
-        style = MaterialTheme.typography.titleLarge
-    )
-
-    Spacer(Modifier.height(16.dp))
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
+    Column(
+        modifier = Modifier.padding(20.dp)
     ) {
 
-        QuickActionCard(
-            title = "Discover Nodes"
-        ) {}
+        Row {
 
-        QuickActionCard(
-            title = "Find Route"
-        ) {}
+            QuickActionCard(
+
+                title = "Discover",
+
+                icon = Icons.Default.Devices
+
+            ) {}
+
+            Spacer(Modifier.width(12.dp))
+
+            QuickActionCard(
+
+                title = "Connect",
+
+                icon = Icons.Default.Wifi
+
+            ) {}
+
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Row {
+
+            QuickActionCard(
+
+                title = "Topology",
+
+                icon = Icons.Default.Hub
+
+            ) {}
+
+            Spacer(Modifier.width(12.dp))
+
+            QuickActionCard(
+
+                title = "Routes",
+
+                icon = Icons.Default.Route
+
+            ) {}
+
+        }
 
     }
 

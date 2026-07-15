@@ -11,97 +11,63 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun MeshGraph(
-
     modifier: Modifier = Modifier
-
 ) {
 
-    Canvas(
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
 
+    Canvas(
         modifier = modifier
             .fillMaxWidth()
             .height(260.dp)
-
     ) {
 
         val center = Offset(size.width / 2, size.height / 2)
 
         drawCircle(
-
-            color = MaterialTheme.colorScheme.primary,
-
+            color = primary,
             radius = 18f,
-
             center = center
-
         )
 
         drawCircle(
-
-            color = MaterialTheme.colorScheme.secondary,
-
+            color = secondary,
             radius = 14f,
-
             center = Offset(center.x - 180f, center.y - 70f)
-
         )
 
         drawCircle(
-
-            color = MaterialTheme.colorScheme.secondary,
-
+            color = secondary,
             radius = 14f,
-
             center = Offset(center.x + 170f, center.y - 90f)
-
         )
 
         drawCircle(
-
-            color = MaterialTheme.colorScheme.secondary,
-
+            color = secondary,
             radius = 14f,
-
             center = Offset(center.x - 120f, center.y + 120f)
-
         )
 
         drawLine(
-
-            color = MaterialTheme.colorScheme.primary,
-
+            color = primary,
             start = center,
-
             end = Offset(center.x - 180f, center.y - 70f),
-
             strokeWidth = 5f
-
         )
 
         drawLine(
-
-            color = MaterialTheme.colorScheme.primary,
-
+            color = primary,
             start = center,
-
             end = Offset(center.x + 170f, center.y - 90f),
-
             strokeWidth = 5f
-
         )
 
         drawLine(
-
-            color = MaterialTheme.colorScheme.primary,
-
+            color = primary,
             start = center,
-
             end = Offset(center.x - 120f, center.y + 120f),
-
             strokeWidth = 5f
-
         )
-
     }
-
 }

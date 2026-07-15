@@ -1,44 +1,30 @@
 package com.orliczspace.mesh_link.ui.screen.dashboard
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 
 @Composable
 fun DashboardHeader() {
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+    Column(
+        modifier = Modifier.padding(20.dp)
     ) {
 
-        Column {
+        Text(
+            text = "Welcome",
+            style = MaterialTheme.typography.titleMedium
+        )
 
-            Text(
-                "Good Morning 👋",
-                style = MaterialTheme.typography.headlineSmall
-            )
+        Spacer(Modifier.height(4.dp))
 
-            Text(
-                "Mesh Network Dashboard",
-                style = MaterialTheme.typography.bodyMedium
-            )
-
-        }
-
-        IconButton(onClick = {}) {
-
-            Icon(
-                Icons.Outlined.Notifications,
-                null
-            )
-
-        }
+        Text(
+            text = "MeshLink Node",
+            style = MaterialTheme.typography.headlineMedium
+        )
 
     }
 

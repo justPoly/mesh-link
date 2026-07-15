@@ -1,15 +1,16 @@
 package com.orliczspace.mesh_link.ui.screen.dashboard
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
-
 import com.orliczspace.mesh_link.ui.navigation.Routes
 import com.orliczspace.mesh_link.ui.scaffold.MeshScaffold
+import com.orliczspace.mesh_link.ui.screen.permission.dashboard.*
 
 @Composable
 fun DashboardScreen(
@@ -17,14 +18,19 @@ fun DashboardScreen(
 ) {
 
     MeshScaffold(
-        title = "Dashboard",
+
+        title = "MeshLink",
+
         navController = navController,
+
         currentRoute = Routes.Dashboard.route
+
     ) { padding ->
 
         DashboardContent(padding)
 
     }
+
 }
 
 @Composable
@@ -32,13 +38,59 @@ private fun DashboardContent(
     padding: PaddingValues
 ) {
 
-    Column(
+    LazyColumn(
+
         modifier = Modifier
             .fillMaxSize()
-            .padding(padding)
+            .padding(padding),
+
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+
+        contentPadding = PaddingValues(20.dp)
+
     ) {
 
-        // We'll build the real dashboard here later.
+        item {
+
+            DashboardHeader()
+
+        }
+
+        item {
+
+            StatusSection()
+
+        }
+
+        item {
+
+            QuickActionsGrid()
+
+        }
+
+        item {
+
+            MetricsGrid()
+
+        }
+
+        item {
+
+            NearbyNodesCarousel()
+
+        }
+
+        item {
+
+            RecentActivitySection()
+
+        }
+
+        item {
+
+            Spacer(Modifier.height(100.dp))
+
+        }
 
     }
 

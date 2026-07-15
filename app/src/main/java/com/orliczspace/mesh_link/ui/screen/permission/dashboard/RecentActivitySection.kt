@@ -6,10 +6,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.orliczspace.mesh_link.ui.components.card.NodeCard
+import com.orliczspace.mesh_link.ui.components.card.InfoCard
 
 @Composable
-fun NearbyNodesSection() {
+fun RecentActivitySection() {
 
     Column(
         modifier = Modifier.padding(20.dp)
@@ -17,7 +17,7 @@ fun NearbyNodesSection() {
 
         Text(
 
-            "Nearby Nodes",
+            "Recent Activity",
 
             style = MaterialTheme.typography.titleLarge
 
@@ -25,21 +25,21 @@ fun NearbyNodesSection() {
 
         Spacer(Modifier.height(16.dp))
 
-        NodeCard(
+        InfoCard(
 
-            nodeName = "Node Alpha",
+            title = "Last Connection",
 
-            status = "Gateway"
+            value = "Connected to Node Alpha"
 
         )
 
         Spacer(Modifier.height(12.dp))
 
-        NodeCard(
+        InfoCard(
 
-            nodeName = "Node Beta",
+            title = "Internet Gateway",
 
-            status = "Connected"
+            value = "Available"
 
         )
 

@@ -7,7 +7,7 @@ import androidx.navigation.NavController
 import androidx.compose.material3.*
 
 import com.orliczspace.mesh_link.ui.components.MeshFab
-import com.orliczspace.mesh_link.ui.components.MeshTopBar
+import com.orliczspace.mesh_link.ui.components.topbar.MeshTopBar
 import com.orliczspace.mesh_link.ui.navigation.MeshBottomBar
 
 @Composable

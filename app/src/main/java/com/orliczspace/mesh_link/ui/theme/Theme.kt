@@ -9,7 +9,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-private val DarkColors = darkColorScheme(
+private val DarkColorScheme = darkColorScheme(
 
     primary = MeshGreen,
 
@@ -43,7 +43,7 @@ fun MeshlinkTheme(
 ) {
 
     val colors =
-        if (darkTheme) DarkColors
+        if (darkTheme) DarkColorScheme
         else LightColors
 
     val view = LocalView.current
