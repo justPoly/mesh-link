@@ -15,6 +15,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 
@@ -22,17 +23,15 @@ import com.orliczspace.mesh_link.network.*
 import com.orliczspace.mesh_link.network.gateway.GatewayNatService
 import com.orliczspace.mesh_link.network.gateway.SQLiteFlowLogger
 import com.orliczspace.mesh_link.network.vpn.MeshVpnService
-
+import com.orliczspace.mesh_link.ui.legacy.MeshlinkTheme
 import com.orliczspace.mesh_link.ui.navigation.MeshNavGraph
 import com.orliczspace.mesh_link.ui.screen.permission.PermissionScreen
-import com.orliczspace.mesh_link.ui.legacy.MeshlinkTheme
 
 import java.net.DatagramSocket
 
 class MainActivity : ComponentActivity() {
 
     companion object {
-        private const val VPN_REQUEST_CODE = 1001
         private const val TAG = "MainActivity"
     }
 
@@ -55,7 +54,8 @@ class MainActivity : ComponentActivity() {
             binder: IBinder?
         ) {
 
-            val service = (binder as MeshVpnService.LocalBinder).getService()
+            val service =
+                (binder as MeshVpnService.LocalBinder).getService()
 
             meshVpnService = service
 
@@ -65,7 +65,9 @@ class MainActivity : ComponentActivity() {
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
+
             meshVpnService = null
+
         }
     }
 
@@ -83,11 +85,28 @@ class MainActivity : ComponentActivity() {
                 mutableStateOf(checkRequiredPermissions())
             }
 
+            var vpnStarted by rememberSaveable {
+                mutableStateOf(false)
+            }
+
             val permissionLauncher =
                 rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions()
                 ) {
                     hasPermissions = checkRequiredPermissions()
+                }
+
+            val vpnLauncher =
+                rememberLauncherForActivityResult(
+                    ActivityResultContracts.StartActivityForResult()
+                ) { result ->
+
+                    if (result.resultCode == RESULT_OK) {
+
+                        startVpnService()
+
+                    }
+
                 }
 
             LaunchedEffect(Unit) {
@@ -104,9 +123,11 @@ class MainActivity : ComponentActivity() {
 
             LaunchedEffect(hasPermissions) {
 
-                if (hasPermissions) {
+                if (hasPermissions && !vpnStarted) {
 
-                    startMeshVpn()
+                    vpnStarted = true
+
+                    startMeshVpn(vpnLauncher)
 
                     startNeighbourDiscovery()
 
@@ -143,11 +164,13 @@ class MainActivity : ComponentActivity() {
      */
     private fun initializeNetworking() {
 
-        val localNodeId = Build.MODEL ?: "unknown-node"
+        val localNodeId =
+            Build.MODEL ?: "unknown-node"
 
-        linkProbeService = LinkProbeService(localNodeId).apply {
-            start()
-        }
+        linkProbeService =
+            LinkProbeService(localNodeId).apply {
+                start()
+            }
 
         adaptiveProbeScheduler =
             AdaptiveProbeScheduler(linkProbeService)
@@ -184,9 +207,12 @@ class MainActivity : ComponentActivity() {
 
         packetForwarder.meshNetworkManager =
             meshNetworkManager
+
     }
 
     private fun startNeighbourDiscovery() {
+
+        if (neighbourService != null) return
 
         neighbourService =
             NeighbourDiscoveryService(this).apply {
@@ -195,13 +221,15 @@ class MainActivity : ComponentActivity() {
 
     }
 
-    private fun startMeshVpn() {
+    private fun startMeshVpn(
+        launcher: androidx.activity.result.ActivityResultLauncher<Intent>
+    ) {
 
         val intent = VpnService.prepare(this)
 
         if (intent != null) {
 
-            startActivityForResult(intent, VPN_REQUEST_CODE)
+            launcher.launch(intent)
 
         } else {
 
@@ -213,37 +241,19 @@ class MainActivity : ComponentActivity() {
 
     private fun startVpnService() {
 
-        val intent = Intent(this, MeshVpnService::class.java)
+        val intent =
+            Intent(this, MeshVpnService::class.java)
 
-        startService(intent)
+        ContextCompat.startForegroundService(
+            this,
+            intent
+        )
 
         bindService(
             intent,
             vpnConnection,
             BIND_AUTO_CREATE
         )
-
-    }
-
-    override fun onActivityResult(
-        requestCode: Int,
-        resultCode: Int,
-        data: Intent?
-    ) {
-
-        super.onActivityResult(
-            requestCode,
-            resultCode,
-            data
-        )
-
-        if (requestCode == VPN_REQUEST_CODE &&
-            resultCode == RESULT_OK
-        ) {
-
-            startVpnService()
-
-        }
 
     }
 
@@ -311,7 +321,9 @@ class MainActivity : ComponentActivity() {
         internetMonitor.close()
 
         runCatching {
+
             unbindService(vpnConnection)
+
         }
 
     }

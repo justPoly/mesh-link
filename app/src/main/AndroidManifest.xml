@@ -2,24 +2,50 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Network state (for InternetMonitor) -->
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- ========================= -->
+    <!-- Internet & Network -->
+    <!-- ========================= -->
 
-    <!-- Wi-Fi Direct core -->
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- Location permissions (both required for Android 12+ compatibility) -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission
+            android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Android 13+ nearby devices (with privacy flag) -->
+    <uses-permission
+            android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <uses-permission
+            android:name="android.permission.CHANGE_WIFI_STATE" />
+
+    <!-- ========================= -->
+    <!-- Location (Wi-Fi Direct) -->
+    <!-- ========================= -->
+
+    <uses-permission
+            android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <uses-permission
+            android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Android 13+ -->
     <uses-permission
             android:name="android.permission.NEARBY_WIFI_DEVICES"
             android:usesPermissionFlags="neverForLocation" />
 
-    <!-- Recommended for Wi-Fi Direct -->
-    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- ========================= -->
+    <!-- Foreground Services -->
+    <!-- ========================= -->
+
+    <uses-permission
+            android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <!-- Android 14 -->
+    <uses-permission
+            android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+
+    <!-- Android 13 Notifications -->
+    <uses-permission
+            android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
             android:allowBackup="true"
@@ -30,27 +56,46 @@
             android:roundIcon="@mipmap/ic_launcher_round"
             android:supportsRtl="true"
             android:theme="@style/Theme.Meshlink"
-            android:exported="true"
             tools:targetApi="34">
+
+        <!-- ========================= -->
+        <!-- Main Activity -->
+        <!-- ========================= -->
 
         <activity
                 android:name=".MainActivity"
                 android:exported="true"
                 android:label="@string/app_name"
                 android:theme="@style/Theme.Meshlink.Splash">
+
             <intent-filter>
+
                 <action android:name="android.intent.action.MAIN" />
+
                 <category android:name="android.intent.category.LAUNCHER" />
+
             </intent-filter>
+
         </activity>
 
-        <service android:name=".network.vpn.MeshVpnService"
-                 android:permission="android.permission.BIND_VPN_SERVICE"
-                 android:exported="true">
+        <!-- ========================= -->
+        <!-- Mesh VPN Service -->
+        <!-- ========================= -->
+
+        <service
+                android:name=".network.vpn.MeshVpnService"
+                android:permission="android.permission.BIND_VPN_SERVICE"
+                android:foregroundServiceType="connectedDevice"
+                android:exported="false">
+
             <intent-filter>
+
                 <action android:name="android.net.VpnService" />
+
             </intent-filter>
+
         </service>
 
     </application>
+
 </manifest>

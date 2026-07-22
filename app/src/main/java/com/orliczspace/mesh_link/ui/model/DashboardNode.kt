@@ -1,4 +1,4 @@
-package com.orliczspace.mesh_link.ui.screen.permission.dashboard.models
+package com.orliczspace.mesh_link.ui.model
 
 data class DashboardNode(
 

@@ -1,5 +1,5 @@
 package com.orliczspace.mesh_link.ui.screen.dashboard
-
+import com.orliczspace.mesh_link.ui.components.HeroHeader
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
+import com.orliczspace.mesh_link.ui.components.AnimatedStatusCard
 import com.orliczspace.mesh_link.ui.navigation.Routes
 import com.orliczspace.mesh_link.ui.scaffold.MeshScaffold
 import com.orliczspace.mesh_link.ui.screen.permission.dashboard.*
@@ -33,63 +34,25 @@ fun DashboardScreen(
 
 }
 
+
 @Composable
 private fun DashboardContent(
     padding: PaddingValues
 ) {
 
     LazyColumn(
-
         modifier = Modifier
             .fillMaxSize()
             .padding(padding),
-
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-
-        contentPadding = PaddingValues(20.dp)
-
+        contentPadding = PaddingValues(20.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
 
         item {
-
-            DashboardHeader()
-
-        }
-
-        item {
-
-            StatusSection()
-
-        }
-
-        item {
-
-            QuickActionsGrid()
-
-        }
-
-        item {
-
-            MetricsGrid()
-
-        }
-
-        item {
-
-            NearbyNodesCarousel()
-
-        }
-
-        item {
-
-            RecentActivitySection()
-
-        }
-
-        item {
-
-            Spacer(Modifier.height(100.dp))
-
+            HeroHeader(
+                username = "Polycarp",
+                connected = true
+            )
         }
 
     }

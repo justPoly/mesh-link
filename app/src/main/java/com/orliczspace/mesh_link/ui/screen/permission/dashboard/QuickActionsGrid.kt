@@ -12,30 +12,17 @@ import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.graphics.vector.ImageVector
 import com.orliczspace.mesh_link.ui.components.card.QuickActionCard
-
-private data class Action(
-
-    val title: String,
-
-    val icon: ImageVector
-
-)
+import com.orliczspace.mesh_link.ui.model.DashboardAction
 
 @Composable
 fun QuickActionsGrid() {
 
     val actions = listOf(
-
-        Action("Discover", Icons.Default.Devices),
-
-        Action("Connect", Icons.Default.Wifi),
-
-        Action("Topology", Icons.Default.Hub),
-
-        Action("Routes", Icons.Default.Route)
-
+        DashboardAction("Discover", Icons.Default.Devices),
+        DashboardAction("Connect", Icons.Default.Wifi),
+        DashboardAction("Topology", Icons.Default.Hub),
+        DashboardAction("Routes", Icons.Default.Route)
     )
 
     LazyVerticalGrid(

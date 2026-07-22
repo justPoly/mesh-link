@@ -9,27 +9,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.orliczspace.mesh_link.ui.components.card.NodeCard
+import com.orliczspace.mesh_link.ui.model.DashboardNode
 
-private data class Node(
-
-    val name: String,
-
-    val state: String
-
-)
 
 @Composable
 fun NearbyNodesCarousel() {
 
     val nodes = listOf(
 
-        Node("Galaxy S24", "Gateway"),
+        DashboardNode("Galaxy S24", "Gateway"),
 
-        Node("Pixel 9", "Connected"),
+        DashboardNode("Pixel 9", "Connected"),
 
-        Node("Laptop", "Nearby"),
+        DashboardNode("Laptop", "Nearby"),
 
-        Node("Tablet", "Weak")
+        DashboardNode("Tablet", "Weak")
 
     )
 
