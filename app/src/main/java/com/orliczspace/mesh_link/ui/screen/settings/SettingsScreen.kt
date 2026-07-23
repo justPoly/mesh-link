@@ -1,4 +1,4 @@
-package com.orliczspace.mesh_link.ui.screen.permission.topology
+package com.orliczspace.mesh_link.ui.screen.settings
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
@@ -8,24 +8,24 @@ import com.orliczspace.mesh_link.ui.navigation.Routes
 import com.orliczspace.mesh_link.ui.scaffold.MeshScaffold
 
 @Composable
-fun TopologyScreen(
+fun SettingsScreen(
     navController: NavHostController
 ) {
 
     MeshScaffold(
-        title = "Topology",
+        title = "Settings",
         navController = navController,
-        currentRoute = Routes.Topology.route
+        currentRoute = Routes.Settings.route
     ) { padding ->
 
-        TopologyContent(padding)
+        SettingsContent(padding)
 
     }
 
 }
 
 @Composable
-private fun TopologyContent(
+private fun SettingsContent(
     padding: PaddingValues
 ) {
 

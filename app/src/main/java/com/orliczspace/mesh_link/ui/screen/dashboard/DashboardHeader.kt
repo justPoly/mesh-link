@@ -1,4 +1,4 @@
-package com.orliczspace.mesh_link.ui.screen.permission.dashboard
+package com.orliczspace.mesh_link.ui.screen.dashboard
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons

@@ -1,4 +1,4 @@
-package com.orliczspace.mesh_link.ui.screen.permission.preview
+package com.orliczspace.mesh_link.ui.screen.mesh_link.preview
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues

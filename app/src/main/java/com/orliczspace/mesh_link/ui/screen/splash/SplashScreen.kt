@@ -1,4 +1,4 @@
-package com.orliczspace.mesh_link.ui.screen.permission.splash
+package com.orliczspace.mesh_link.ui.screen.splash
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*

@@ -25,7 +25,7 @@ import com.orliczspace.mesh_link.network.gateway.SQLiteFlowLogger
 import com.orliczspace.mesh_link.network.vpn.MeshVpnService
 import com.orliczspace.mesh_link.ui.legacy.MeshlinkTheme
 import com.orliczspace.mesh_link.ui.navigation.MeshNavGraph
-import com.orliczspace.mesh_link.ui.screen.permission.PermissionScreen
+import com.orliczspace.mesh_link.ui.screen.PermissionScreen
 
 import java.net.DatagramSocket
 

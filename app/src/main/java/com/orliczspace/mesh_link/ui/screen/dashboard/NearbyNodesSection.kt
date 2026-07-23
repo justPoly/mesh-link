@@ -1,4 +1,4 @@
-package com.orliczspace.mesh_link.ui.screen.permission.dashboard
+package com.orliczspace.mesh_link.ui.screen.dashboard
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
@@ -6,10 +6,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.orliczspace.mesh_link.ui.components.card.InfoCard
+import com.orliczspace.mesh_link.ui.components.card.NodeCard
 
 @Composable
-fun RecentActivitySection() {
+fun NearbyNodesSection() {
 
     Column(
         modifier = Modifier.padding(20.dp)
@@ -17,7 +17,7 @@ fun RecentActivitySection() {
 
         Text(
 
-            "Recent Activity",
+            "Nearby Nodes",
 
             style = MaterialTheme.typography.titleLarge
 
@@ -25,21 +25,21 @@ fun RecentActivitySection() {
 
         Spacer(Modifier.height(16.dp))
 
-        InfoCard(
+        NodeCard(
 
-            title = "Last Connection",
+            nodeName = "Node Alpha",
 
-            value = "Connected to Node Alpha"
+            status = "Gateway"
 
         )
 
         Spacer(Modifier.height(12.dp))
 
-        InfoCard(
+        NodeCard(
 
-            title = "Internet Gateway",
+            nodeName = "Node Beta",
 
-            value = "Available"
+            status = "Connected"
 
         )
 

@@ -1,4 +1,5 @@
 package com.orliczspace.mesh_link.ui.screen.dashboard
+
 import com.orliczspace.mesh_link.ui.components.HeroHeader
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,7 +12,7 @@ import androidx.navigation.NavHostController
 import com.orliczspace.mesh_link.ui.components.AnimatedStatusCard
 import com.orliczspace.mesh_link.ui.navigation.Routes
 import com.orliczspace.mesh_link.ui.scaffold.MeshScaffold
-import com.orliczspace.mesh_link.ui.screen.permission.dashboard.*
+import com.orliczspace.mesh_link.ui.screen.dashboard.*
 
 @Composable
 fun DashboardScreen(
@@ -56,5 +57,9 @@ private fun DashboardContent(
         }
 
     }
+
+}
+
+class DashboardScreen {
 
 }
