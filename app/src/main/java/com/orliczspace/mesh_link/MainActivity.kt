@@ -14,12 +14,22 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.runtime.*
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 
-import com.orliczspace.mesh_link.network.*
+import com.orliczspace.mesh_link.network.AdaptiveProbeScheduler
+import com.orliczspace.mesh_link.network.LinkProbeService
+import com.orliczspace.mesh_link.network.MeshNetworkManager
+import com.orliczspace.mesh_link.network.NeighbourDiscoveryService
+import com.orliczspace.mesh_link.network.PacketForwarder
+import com.orliczspace.mesh_link.network.RoutingStateRepository
+import com.orliczspace.mesh_link.network.InternetMonitor
 import com.orliczspace.mesh_link.network.gateway.GatewayNatService
 import com.orliczspace.mesh_link.network.gateway.SQLiteFlowLogger
 import com.orliczspace.mesh_link.network.vpn.MeshVpnService
@@ -44,8 +54,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var gatewayNatService: GatewayNatService
     private lateinit var internetMonitor: InternetMonitor
     private lateinit var adaptiveProbeScheduler: AdaptiveProbeScheduler
-
-    private var neighbourService: NeighbourDiscoveryService? = null
+    private lateinit var neighbourService: NeighbourDiscoveryService
 
     private val vpnConnection = object : ServiceConnection {
 
@@ -102,11 +111,8 @@ class MainActivity : ComponentActivity() {
                 ) { result ->
 
                     if (result.resultCode == RESULT_OK) {
-
                         startVpnService()
-
                     }
-
                 }
 
             LaunchedEffect(Unit) {
@@ -139,7 +145,13 @@ class MainActivity : ComponentActivity() {
 
                 if (hasPermissions) {
 
-                    MeshNavGraph()
+                    MeshNavGraph(
+                        linkProbeService = linkProbeService,
+                        routingRepository = routingRepository,
+                        internetMonitor = internetMonitor,
+                        neighbourService = neighbourService,
+                        gatewayNatService = gatewayNatService
+                    )
 
                 } else {
 
@@ -154,9 +166,7 @@ class MainActivity : ComponentActivity() {
                 }
 
             }
-
         }
-
     }
 
     /**
@@ -167,20 +177,44 @@ class MainActivity : ComponentActivity() {
         val localNodeId =
             Build.MODEL ?: "unknown-node"
 
+        /*
+         * Link probing
+         */
         linkProbeService =
             LinkProbeService(localNodeId).apply {
                 start()
             }
 
+        /*
+         * Adaptive probing
+         */
         adaptiveProbeScheduler =
             AdaptiveProbeScheduler(linkProbeService)
 
+        /*
+         * Routing
+         */
         routingRepository =
             RoutingStateRepository(linkProbeService)
 
+        /*
+         * Internet monitoring
+         */
         internetMonitor =
             InternetMonitor(this)
 
+        /*
+         * Wi-Fi Direct neighbour discovery.
+         *
+         * The instance is created here so the same
+         * instance can be passed to Compose.
+         */
+        neighbourService =
+            NeighbourDiscoveryService(this)
+
+        /*
+         * Gateway NAT
+         */
         gatewayNatService =
             GatewayNatService(
                 flowLogger = SQLiteFlowLogger(this),
@@ -189,8 +223,14 @@ class MainActivity : ComponentActivity() {
                 }
             )
 
+        /*
+         * Shared UDP socket
+         */
         val socket = DatagramSocket()
 
+        /*
+         * Packet forwarding
+         */
         packetForwarder =
             PacketForwarder(
                 socket = socket,
@@ -198,6 +238,9 @@ class MainActivity : ComponentActivity() {
                 gatewayNatService = gatewayNatService
             )
 
+        /*
+         * Mesh network manager
+         */
         meshNetworkManager =
             MeshNetworkManager(
                 localNodeId = localNodeId,
@@ -207,17 +250,11 @@ class MainActivity : ComponentActivity() {
 
         packetForwarder.meshNetworkManager =
             meshNetworkManager
-
     }
 
     private fun startNeighbourDiscovery() {
 
-        if (neighbourService != null) return
-
-        neighbourService =
-            NeighbourDiscoveryService(this).apply {
-                startDiscovery()
-            }
+        neighbourService.startDiscovery()
 
     }
 
@@ -236,7 +273,6 @@ class MainActivity : ComponentActivity() {
             startVpnService()
 
         }
-
     }
 
     private fun startVpnService() {
@@ -254,7 +290,6 @@ class MainActivity : ComponentActivity() {
             vpnConnection,
             BIND_AUTO_CREATE
         )
-
     }
 
     private fun checkRequiredPermissions(): Boolean {
@@ -286,7 +321,6 @@ class MainActivity : ComponentActivity() {
             }
 
         return fine && coarse && nearby
-
     }
 
     private fun getRequiredPermissions(): Array<String> {
@@ -305,14 +339,11 @@ class MainActivity : ComponentActivity() {
         }
 
         return permissions.toTypedArray()
-
     }
 
     override fun onDestroy() {
 
-        super.onDestroy()
-
-        neighbourService?.stopDiscovery()
+        neighbourService.stopDiscovery()
 
         adaptiveProbeScheduler.stopAll()
 
@@ -320,12 +351,12 @@ class MainActivity : ComponentActivity() {
 
         internetMonitor.close()
 
+        gatewayNatService.stop()
+
         runCatching {
-
             unbindService(vpnConnection)
-
         }
 
+        super.onDestroy()
     }
-
 }

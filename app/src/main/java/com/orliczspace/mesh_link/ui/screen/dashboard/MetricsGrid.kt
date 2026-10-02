@@ -2,12 +2,9 @@ package com.orliczspace.mesh_link.ui.screen.dashboard
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Router
@@ -23,86 +20,97 @@ import com.orliczspace.mesh_link.ui.components.AnimatedMetricCard
 import com.orliczspace.mesh_link.ui.model.DashboardMetric
 
 @Composable
-fun MetricsGrid() {
-
+fun MetricsGrid(
+    connectedNodes: Int,
+    latency: Int,
+    gateways: Int,
+    internet: Int
+) {
     val metrics = listOf(
-
         DashboardMetric(
             title = "Connected Nodes",
-            value = 24,
+            value = connectedNodes,
             icon = Icons.Default.Devices,
             color = Color(0xFF4ADE80)
         ),
-
         DashboardMetric(
             title = "Latency",
-            value = 18,
+            value = latency,
             icon = Icons.Default.Speed,
             color = Color(0xFFFFB020)
         ),
-
         DashboardMetric(
             title = "Gateways",
-            value = 2,
+            value = gateways,
             icon = Icons.Default.Router,
             color = Color(0xFF60A5FA)
         ),
-
         DashboardMetric(
             title = "Internet",
-            value = 1,
+            value = internet,
             icon = Icons.Default.Wifi,
             color = Color(0xFFEC4899)
         )
-
     )
 
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
-
         Text(
             text = "Network Metrics",
             style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(bottom = 16.dp)
+            modifier = Modifier.padding(
+                start = 4.dp,
+                bottom = 16.dp
+            )
         )
 
-        LazyVerticalGrid(
-
-            columns = GridCells.Adaptive(minSize = 170.dp),
-
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 320.dp),
-
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-
-            userScrollEnabled = false
-
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            AnimatedMetricCard(
+                title = metrics[0].title,
+                value = metrics[0].value,
+                icon = metrics[0].icon,
+                color = metrics[0].color,
+                modifier = Modifier.weight(1f),
+                animationDelay = 0L
+            )
 
-            itemsIndexed(metrics) { index, metric ->
-
-                AnimatedMetricCard(
-
-                    title = metric.title,
-
-                    value = metric.value,
-
-                    icon = metric.icon,
-
-                    color = metric.color,
-
-                    animationDelay = index * 150L
-
-                )
-
-            }
-
+            AnimatedMetricCard(
+                title = metrics[1].title,
+                value = metrics[1].value,
+                icon = metrics[1].icon,
+                color = metrics[1].color,
+                modifier = Modifier.weight(1f),
+                animationDelay = 150L
+            )
         }
 
-    }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            AnimatedMetricCard(
+                title = metrics[2].title,
+                value = metrics[2].value,
+                icon = metrics[2].icon,
+                color = metrics[2].color,
+                modifier = Modifier.weight(1f),
+                animationDelay = 300L
+            )
 
+            AnimatedMetricCard(
+                title = metrics[3].title,
+                value = metrics[3].value,
+                icon = metrics[3].icon,
+                color = metrics[3].color,
+                modifier = Modifier.weight(1f),
+                animationDelay = 450L
+            )
+        }
+    }
 }

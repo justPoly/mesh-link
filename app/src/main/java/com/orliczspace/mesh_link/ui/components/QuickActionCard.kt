@@ -34,9 +34,9 @@ import com.orliczspace.mesh_link.ui.components.effects.rememberShimmerBrush
 fun QuickActionCard(
     title: String,
     icon: ImageVector,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-
     var pressed by remember {
         mutableStateOf(false)
     }
@@ -70,7 +70,7 @@ fun QuickActionCard(
         )
 
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(150.dp)
             .scale(scale)
@@ -92,7 +92,6 @@ fun QuickActionCard(
             containerColor = Color.Transparent
         )
     ) {
-
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -107,12 +106,10 @@ fun QuickActionCard(
                 .background(shimmerBrush)
                 .padding(20.dp)
         ) {
-
             Column(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-
                 Box(
                     modifier = Modifier
                         .size(56.dp)
@@ -122,14 +119,12 @@ fun QuickActionCard(
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
                         tint = Color(0xFF4ADE80).copy(alpha = glow),
                         modifier = Modifier.size(30.dp)
                     )
-
                 }
 
                 Row(
@@ -137,7 +132,6 @@ fun QuickActionCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-
                     Text(
                         text = title,
                         style = MaterialTheme.typography.titleMedium,
@@ -149,13 +143,8 @@ fun QuickActionCard(
                         contentDescription = null,
                         tint = Color.White.copy(alpha = 0.65f)
                     )
-
                 }
-
             }
-
         }
-
     }
-
 }

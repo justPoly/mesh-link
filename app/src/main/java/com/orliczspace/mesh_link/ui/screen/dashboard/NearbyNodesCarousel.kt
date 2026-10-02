@@ -1,6 +1,10 @@
 package com.orliczspace.mesh_link.ui.screen.dashboard
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
@@ -11,60 +15,59 @@ import androidx.compose.ui.unit.dp
 import com.orliczspace.mesh_link.ui.components.card.NodeCard
 import com.orliczspace.mesh_link.ui.model.DashboardNode
 
-
 @Composable
 fun NearbyNodesCarousel() {
 
     val nodes = listOf(
 
-        DashboardNode("Galaxy S24", "Gateway"),
+        DashboardNode(
+            "Galaxy S24",
+            "Gateway"
+        ),
 
-        DashboardNode("Pixel 9", "Connected"),
+        DashboardNode(
+            "Pixel 9",
+            "Connected"
+        ),
 
-        DashboardNode("Laptop", "Nearby"),
+        DashboardNode(
+            "Laptop",
+            "Nearby"
+        ),
 
-        DashboardNode("Tablet", "Weak")
-
+        DashboardNode(
+            "Tablet",
+            "Weak"
+        )
     )
 
     Column {
 
         Text(
-
-            "Nearby Nodes",
-
+            text = "Nearby Nodes",
             style = MaterialTheme.typography.titleLarge
-
         )
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(
+            modifier = Modifier.width(12.dp)
+        )
 
         LazyRow(
-
             horizontalArrangement = Arrangement.spacedBy(16.dp)
-
         ) {
 
-            items(nodes) {
+            items(nodes) { node ->
 
                 Box(
                     modifier = Modifier.width(260.dp)
                 ) {
 
                     NodeCard(
-
-                        nodeName = it.name,
-
-                        status = it.state
-
+                        nodeName = node.name,
+                        status = node.state
                     )
-
                 }
-
             }
-
         }
-
     }
-
 }
