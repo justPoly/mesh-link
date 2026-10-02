@@ -160,21 +160,12 @@ fun DashboardScreen(
         }
 
     /*
-     * Read NAT state so the dashboard observes
-     * the current GatewayNatService state as well.
-     *
-     * There is currently no NAT-flow metric card,
-     * so we don't display this value yet.
-     */
-    val activeNatFlows =
-        gatewayNatService.getActiveFlows()
-
-    /*
-     * Keep the refresh and NAT read live.
+     * Keep the refresh value referenced so Compose
+     * continues to re-read the non-observable service state.
      */
     @Suppress("UNUSED_VARIABLE")
-    val liveNetworkState =
-        refreshKey to activeNatFlows.size
+    val currentRefresh =
+        refreshKey
 
     MeshScaffold(
         title = "Dashboard",
@@ -211,6 +202,9 @@ fun DashboardScreen(
 
             routingRepository =
                 routingRepository,
+
+            gatewayNatService =
+                gatewayNatService,
 
             onFindNodesClick = {
                 navController.navigate(
@@ -251,6 +245,7 @@ private fun DashboardContent(
     neighbourService: NeighbourDiscoveryService,
     linkProbeService: LinkProbeService,
     routingRepository: RoutingStateRepository,
+    gatewayNatService: GatewayNatService,
     onFindNodesClick: () -> Unit,
     onDiagnosticsClick: () -> Unit,
     onTopologyClick: () -> Unit,
@@ -302,6 +297,12 @@ private fun DashboardContent(
         item {
             GatewaySection(
                 routingRepository = routingRepository
+            )
+        }
+
+        item {
+            NetworkStatsSection(
+                gatewayNatService = gatewayNatService
             )
         }
 
