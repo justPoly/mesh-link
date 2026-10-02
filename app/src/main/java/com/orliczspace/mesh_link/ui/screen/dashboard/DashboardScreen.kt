@@ -321,5 +321,9 @@ private fun DashboardContent(
                     onRoutesClick
             )
         }
+
+        item {
+            RecentActivitySection()
+        }
     }
 }

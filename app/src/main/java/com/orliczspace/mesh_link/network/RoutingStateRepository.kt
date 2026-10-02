@@ -18,28 +18,43 @@ class RoutingStateRepository(
         nodeId: String,
         hasInternetAccess: Boolean
     ) {
-        val smoothedRttLong = linkProbeService.getAverageRtt(nodeId) ?: return
-        val smoothedRtt = smoothedRttLong.toInt()
-        val stability = linkProbeService.getStability(nodeId)
+        val smoothedRttLong =
+            linkProbeService.getAverageRtt(nodeId) ?: return
 
-        val oldState = routingTable[nodeId]
-        val lastRtt = oldState?.averageLatencyMs ?: smoothedRtt
+        val smoothedRtt =
+            smoothedRttLong.toInt()
+
+        val stability =
+            linkProbeService.getStability(nodeId)
+
+        val oldState =
+            routingTable[nodeId]
+
+        val lastRtt =
+            oldState?.averageLatencyMs ?: smoothedRtt
 
         val degradationRatio =
-            if (lastRtt > 0) smoothedRtt.toDouble() / lastRtt else 1.0
+            if (lastRtt > 0) {
+                smoothedRtt.toDouble() / lastRtt
+            } else {
+                1.0
+            }
 
         val degradationCount =
-            if (degradationRatio > RTT_DEGRADATION_THRESHOLD)
+            if (degradationRatio > RTT_DEGRADATION_THRESHOLD) {
                 (oldState?.degradationCount ?: 0) + 1
-            else 0
+            } else {
+                0
+            }
 
-        val stabilityScore = when {
-            stability <= 10 -> 100.0
-            stability <= 30 -> 80.0
-            stability <= 60 -> 60.0
-            stability <= 100 -> 40.0
-            else -> 20.0
-        }
+        val stabilityScore =
+            when {
+                stability <= 10 -> 100.0
+                stability <= 30 -> 80.0
+                stability <= 60 -> 60.0
+                stability <= 100 -> 40.0
+                else -> 20.0
+            }
 
         routingTable[nodeId] = RoutingState(
             nodeId = nodeId,
@@ -51,29 +66,79 @@ class RoutingStateRepository(
             isGateway = oldState?.isGateway ?: false
         )
 
-        if (oldState?.isGateway == true && degradationCount >= MAX_DEGRADATION_COUNT) {
+        if (oldState == null) {
+            NetworkActivityLog.record(
+                message = "Route added",
+                detail = nodeId
+            )
+        }
+
+        if (
+            oldState?.isGateway == true &&
+            degradationCount >= MAX_DEGRADATION_COUNT
+        ) {
             electGateway()
         }
     }
 
     fun removeNode(nodeId: String) {
-        routingTable.remove(nodeId)
+        val removed =
+            routingTable.remove(nodeId)
+
+        if (removed != null) {
+            NetworkActivityLog.record(
+                message = "Node removed",
+                detail = nodeId
+            )
+        }
     }
 
     fun electGateway(): RoutingState? {
-        val updated = routingTable.values.map {
-            it.copy(
-                gatewayScore = GatewayScorer.score(it),
-                degradationCount = 0
-            )
-        }
 
-        val gateway = updated.maxByOrNull { it.gatewayScore }
+        val previousGateway =
+            routingTable.values
+                .firstOrNull { it.isGateway }
+                ?.nodeId
+
+        val updated =
+            routingTable.values.map {
+                it.copy(
+                    gatewayScore = GatewayScorer.score(it),
+                    degradationCount = 0
+                )
+            }
+
+        val gateway =
+            updated.maxByOrNull {
+                it.gatewayScore
+            }
 
         routingTable.clear()
+
         updated.forEach {
             routingTable[it.nodeId] =
-                it.copy(isGateway = it.nodeId == gateway?.nodeId)
+                it.copy(
+                    isGateway =
+                        it.nodeId == gateway?.nodeId
+                )
+        }
+
+        val newGateway =
+            gateway?.nodeId
+
+        if (previousGateway != newGateway) {
+
+            if (newGateway != null) {
+                NetworkActivityLog.record(
+                    message = "Gateway changed",
+                    detail = newGateway
+                )
+            } else if (previousGateway != null) {
+                NetworkActivityLog.record(
+                    message = "Gateway unavailable",
+                    detail = previousGateway
+                )
+            }
         }
 
         return gateway

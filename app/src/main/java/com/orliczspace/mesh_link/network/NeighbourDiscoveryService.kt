@@ -34,11 +34,33 @@ class NeighbourDiscoveryService(
     val discoveredPeers = mutableStateListOf<String>()
 
     private val peerListListener = WifiP2pManager.PeerListListener { peers ->
+
+        val previousPeers = discoveredPeers.toSet()
+
+        val currentPeers =
+            peers.deviceList
+                .map { device ->
+                    device.deviceName ?: "Unknown Device"
+                }
+                .toSet()
+
         discoveredPeers.clear()
-        peers.deviceList.forEach { device ->
-            discoveredPeers.add(device.deviceName ?: "Unknown Device")
+        discoveredPeers.addAll(currentPeers)
+
+        val newlyDiscovered =
+            currentPeers - previousPeers
+
+        newlyDiscovered.forEach { deviceName ->
+            NetworkActivityLog.record(
+                message = "Node discovered",
+                detail = deviceName
+            )
         }
-        Log.d("NeighbourDiscovery", "Peers found: ${discoveredPeers.size}")
+
+        Log.d(
+            "NeighbourDiscovery",
+            "Peers found: ${discoveredPeers.size}"
+        )
     }
 
     /* ---------------- ROUTING-LEVEL STATE ---------------- */
@@ -60,8 +82,18 @@ class NeighbourDiscoveryService(
             val groupOwnerIp = info.groupOwnerAddress?.hostAddress ?: return@ConnectionInfoListener
             val role = if (info.isGroupOwner) "GO" else "CLIENT"
 
+            val previousConnection =
+                connectedPeers[role]
+
             connectedPeers.clear()
             connectedPeers[role] = groupOwnerIp
+
+            if (previousConnection != groupOwnerIp) {
+                NetworkActivityLog.record(
+                    message = "Wi-Fi Direct connected",
+                    detail = "$role @ $groupOwnerIp"
+                )
+            }
 
             Log.d(
                 "NeighbourDiscovery",

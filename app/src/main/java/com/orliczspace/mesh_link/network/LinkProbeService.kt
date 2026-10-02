@@ -154,11 +154,38 @@ class LinkProbeService(
 
     /* ---------------- PEER REGISTRATION ---------------- */
 
-    private fun registerPeer(nodeId: String, ip: String, capabilities: Capabilities?) {
+    private fun registerPeer(
+        nodeId: String,
+        ip: String,
+        capabilities: Capabilities?
+    ) {
         val existing = knownPeers[nodeId]
-        if (existing == null || existing != ip) {
+
+        if (existing == null) {
             knownPeers[nodeId] = ip
-            Log.d("LinkProbeService", "Peer registered: $nodeId @ $ip | $capabilities")
+
+            NetworkActivityLog.record(
+                message = "Node connected",
+                detail = "$nodeId @ $ip"
+            )
+
+            Log.d(
+                "LinkProbeService",
+                "Peer registered: $nodeId @ $ip | $capabilities"
+            )
+
+        } else if (existing != ip) {
+            knownPeers[nodeId] = ip
+
+            NetworkActivityLog.record(
+                message = "Node address changed",
+                detail = "$nodeId → $ip"
+            )
+
+            Log.d(
+                "LinkProbeService",
+                "Peer address updated: $nodeId @ $ip | $capabilities"
+            )
         }
     }
 

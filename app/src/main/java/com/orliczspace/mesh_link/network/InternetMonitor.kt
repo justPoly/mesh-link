@@ -104,7 +104,41 @@ class InternetMonitor(context: Context) {
         }
 
         mainScope.launch {
-            Log.d("InternetMonitor", "Status Update → Connected: $hasInternet, Type: $type")
+
+            val previousConnected =
+                _isConnected.value
+
+            val previousType =
+                _connectionType.value
+
+            if (
+                previousConnected != hasInternet ||
+                previousType != type
+            ) {
+
+                val detail =
+                    if (hasInternet) {
+                        type
+                    } else {
+                        "None"
+                    }
+
+                NetworkActivityLog.record(
+                    message =
+                        if (hasInternet) {
+                            "Internet connected"
+                        } else {
+                            "Internet disconnected"
+                        },
+                    detail = detail
+                )
+            }
+
+            Log.d(
+                "InternetMonitor",
+                "Status Update → Connected: $hasInternet, Type: $type"
+            )
+
             _isConnected.value = hasInternet
             _connectionType.value = type
         }
@@ -133,7 +167,34 @@ class InternetMonitor(context: Context) {
         }
 
         mainScope.launch {
-            Log.d("InternetMonitor", "Status Update → Connected: $hasInternet, Type: $type")
+
+            val previousConnected =
+                _isConnected.value
+
+            val previousType =
+                _connectionType.value
+
+            if (
+                previousConnected != hasInternet ||
+                previousType != type
+            ) {
+
+                NetworkActivityLog.record(
+                    message =
+                        if (hasInternet) {
+                            "Internet connected"
+                        } else {
+                            "Internet disconnected"
+                        },
+                    detail = type
+                )
+            }
+
+            Log.d(
+                "InternetMonitor",
+                "Status Update → Connected: $hasInternet, Type: $type"
+            )
+
             _isConnected.value = hasInternet
             _connectionType.value = type
         }
