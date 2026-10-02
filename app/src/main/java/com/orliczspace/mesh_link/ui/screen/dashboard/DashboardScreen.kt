@@ -300,6 +300,12 @@ private fun DashboardContent(
         }
 
         item {
+            GatewaySection(
+                routingRepository = routingRepository
+            )
+        }
+
+        item {
             QuickActionsSection(
                 onFindNodesClick =
                     onFindNodesClick,
