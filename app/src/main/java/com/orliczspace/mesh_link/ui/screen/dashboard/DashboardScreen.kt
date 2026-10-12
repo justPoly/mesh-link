@@ -37,12 +37,11 @@ fun DashboardScreen(
 ) {
     /*
      * LinkProbeService and GatewayNatService use
-     * ConcurrentHashMap internally, so changes inside
-     * those services are not automatically observable
-     * by Compose.
+     * ConcurrentHashMap internally, so their changes
+     * are not automatically observable by Compose.
      *
-     * Refresh the dashboard once every second so
-     * current networking values are reflected.
+     * Refresh the dashboard every second to reflect
+     * current networking values.
      */
     var dashboardRefresh by remember {
         mutableStateOf(0)
@@ -55,14 +54,12 @@ fun DashboardScreen(
         }
     }
 
-    /*
-     * Make Compose read the latest non-observable
-     * networking state on every refresh.
-     */
+    // Read the latest non-observable service state.
     val refreshKey = dashboardRefresh
 
     // VPN setup error.
-    val vpnErrorMessage = MeshVpnService.vpnErrorMessage
+    val vpnErrorMessage =
+        MeshVpnService.vpnErrorMessage
 
     // Internet status.
     val isInternetConnected =
@@ -88,7 +85,7 @@ fun DashboardScreen(
 
     /*
      * Connected-node metric.
-     * This retains the existing dashboard calculation.
+     * Preserve the existing dashboard calculation.
      */
     val connectedNodes =
         when {
@@ -143,7 +140,6 @@ fun DashboardScreen(
 
     /*
      * Dashboard loading state.
-     *
      * Failed or stopped discovery is not treated
      * as an ongoing loading operation.
      */
@@ -193,6 +189,7 @@ fun DashboardScreen(
         navController = navController,
         currentRoute = Routes.Dashboard.route
     ) { padding ->
+
         DashboardContent(
             padding = padding,
             isInternetConnected = isInternetConnected,
@@ -208,17 +205,41 @@ fun DashboardScreen(
             linkProbeService = linkProbeService,
             routingRepository = routingRepository,
             gatewayNatService = gatewayNatService,
-            onFindNodesClick = {
-                navController.navigate(Routes.Nodes.route)
+
+            // Card 12: Discover screen.
+            onDiscoverClick = {
+                navController.navigate(
+                    Routes.Discovery.route
+                )
             },
-            onDiagnosticsClick = {
-                navController.navigate(Routes.Performance.route)
+
+            // Card 12: Nodes screen.
+            onNodesClick = {
+                navController.navigate(
+                    Routes.Nodes.route
+                )
             },
+
+            // Card 12: Topology screen.
             onTopologyClick = {
-                navController.navigate(Routes.Topology.route)
+                navController.navigate(
+                    Routes.Topology.route
+                )
             },
+
+            // Card 12: Routes screen.
             onRoutesClick = {
-                navController.navigate(Routes.Routing.route)
+                navController.navigate(
+                    Routes.Routing.route
+                )
+            },
+
+            // Card 12: Statistics screen.
+            // Reuses the existing Performance destination.
+            onStatisticsClick = {
+                navController.navigate(
+                    Routes.Performance.route
+                )
             }
         )
     }
@@ -240,10 +261,11 @@ private fun DashboardContent(
     linkProbeService: LinkProbeService,
     routingRepository: RoutingStateRepository,
     gatewayNatService: GatewayNatService,
-    onFindNodesClick: () -> Unit,
-    onDiagnosticsClick: () -> Unit,
+    onDiscoverClick: () -> Unit,
+    onNodesClick: () -> Unit,
     onTopologyClick: () -> Unit,
-    onRoutesClick: () -> Unit
+    onRoutesClick: () -> Unit,
+    onStatisticsClick: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -278,7 +300,6 @@ private fun DashboardContent(
             }
         }
 
-
         // Card 11: Gateway failure.
         item {
             routingRepository.gatewayErrorMessage?.let { errorMessage ->
@@ -299,6 +320,15 @@ private fun DashboardContent(
             }
         }
 
+        // Dashboard loading state.
+        item {
+            dashboardLoadingState?.let { state ->
+                DashboardLoadingSection(
+                    state = state
+                )
+            }
+        }
+
         // Card 11: Route failure.
         item {
             routingRepository.routeErrorMessage?.let { errorMessage ->
@@ -309,16 +339,12 @@ private fun DashboardContent(
             }
         }
 
-        // Dashboard loading state.
-        item {
-            dashboardLoadingState?.let { state ->
-                DashboardLoadingSection(state = state)
-            }
-        }
-
         // Card 11: Peer discovery error.
         item {
-            if (discoveryStatus == PeerDiscoveryStatus.FAILED) {
+            if (
+                discoveryStatus ==
+                PeerDiscoveryStatus.FAILED
+            ) {
                 DashboardErrorState(
                     title = "Peer discovery failed",
                     message = "Mesh-link could not start or continue Wi-Fi Direct discovery. Check Wi-Fi, nearby-device permissions, and location permissions where required, then try discovery again."
@@ -368,10 +394,9 @@ private fun DashboardContent(
             )
         }
 
+        // Card 12: Functional dashboard actions.
         item {
             QuickActionsSection(
-                onFindNodesClick = onFindNodesClick,
-                onDiagnosticsClick = onDiagnosticsClick,
                 onTopologyClick = onTopologyClick,
                 onRoutesClick = onRoutesClick
             )

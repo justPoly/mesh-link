@@ -1,3 +1,4 @@
+
 package com.orliczspace.mesh_link.ui.screen.dashboard
 
 import androidx.compose.foundation.layout.Column
@@ -11,26 +12,18 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun QuickActionsSection(
-    onFindNodesClick: () -> Unit,
-    onDiagnosticsClick: () -> Unit,
     onTopologyClick: () -> Unit,
     onRoutesClick: () -> Unit
 ) {
-
     Column {
-
         Text(
             text = "Quick Actions",
             style = MaterialTheme.typography.titleLarge
         )
 
-        Spacer(
-            modifier = Modifier.height(16.dp)
-        )
+        Spacer(modifier = Modifier.height(16.dp))
 
         QuickActionsGrid(
-            onFindNodesClick = onFindNodesClick,
-            onDiagnosticsClick = onDiagnosticsClick,
             onTopologyClick = onTopologyClick,
             onRoutesClick = onRoutesClick
         )
