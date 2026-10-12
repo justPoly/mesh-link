@@ -20,12 +20,17 @@ import com.orliczspace.mesh_link.network.packet.PacketType
 import kotlinx.coroutines.*
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 class MeshVpnService : VpnService() {
 
     companion object {
         private const val TAG = "MeshVpnService"
 
+        var vpnErrorMessage: String? by mutableStateOf(null)
+            private set
         private const val CHANNEL_ID = "mesh_vpn_channel"
         private const val CHANNEL_NAME = "Mesh VPN"
 
@@ -64,6 +69,7 @@ class MeshVpnService : VpnService() {
         Log.d(TAG, "Foreground VPN service started")
     }
 
+
     override fun onStartCommand(
         intent: Intent?,
         flags: Int,
@@ -71,15 +77,25 @@ class MeshVpnService : VpnService() {
     ): Int {
 
         if (tunInterface == null) {
+            vpnErrorMessage = null
 
-            setupVpn()
+            val established = setupVpn()
 
-            startTunReader()
+            if (established) {
+                startTunReader()
+            } else {
+                if (vpnErrorMessage == null) {
+                    vpnErrorMessage =
+                        "The VPN interface could not be established."
+                }
 
+                stopSelf(startId)
+            }
         }
 
         return START_STICKY
     }
+
 
     override fun onDestroy() {
 
@@ -98,23 +114,44 @@ class MeshVpnService : VpnService() {
         Log.d(TAG, "VPN service destroyed")
     }
 
-    private fun setupVpn() {
 
-        tunInterface =
-            Builder()
+    private fun setupVpn(): Boolean {
+        return try {
+            val establishedInterface = Builder()
                 .setSession("MeshLink VPN")
                 .addAddress("10.0.0.2", 32)
                 .addRoute("0.0.0.0", 0)
                 .setBlocking(true)
                 .establish()
 
-        val fd = tunInterface!!.fileDescriptor
+            if (establishedInterface == null) {
+                vpnErrorMessage =
+                    "Android did not establish the VPN interface. Check VPN permission and approval."
 
-        tunInput = FileInputStream(fd)
-        tunOutput = FileOutputStream(fd)
+                Log.e(TAG, vpnErrorMessage!!)
+                false
+            } else {
+                tunInterface = establishedInterface
 
-        Log.d(TAG, "VPN interface established")
+                val fd = establishedInterface.fileDescriptor
+
+                tunInput = FileInputStream(fd)
+                tunOutput = FileOutputStream(fd)
+
+                vpnErrorMessage = null
+
+                Log.d(TAG, "VPN interface established")
+                true
+            }
+        } catch (e: Exception) {
+            vpnErrorMessage =
+                "VPN setup failed: ${e.message ?: "Unknown error"}"
+
+            Log.e(TAG, "VPN setup failed", e)
+            false
+        }
     }
+
 
     private fun startTunReader() {
 

@@ -32,6 +32,7 @@ fun DashboardLoadingSection(
     state: DashboardLoadingState
 ) {
     val (title, description) = when (state) {
+
         DashboardLoadingState.INITIALIZING -> {
             "Initializing" to
                     "Preparing Mesh-link networking services."

@@ -1,3 +1,4 @@
+
 package com.orliczspace.mesh_link.ui.screen.dashboard
 
 import androidx.compose.foundation.layout.Arrangement
@@ -17,8 +18,10 @@ import androidx.navigation.NavHostController
 import com.orliczspace.mesh_link.network.InternetMonitor
 import com.orliczspace.mesh_link.network.LinkProbeService
 import com.orliczspace.mesh_link.network.NeighbourDiscoveryService
+import com.orliczspace.mesh_link.network.PeerDiscoveryStatus
 import com.orliczspace.mesh_link.network.RoutingStateRepository
 import com.orliczspace.mesh_link.network.gateway.GatewayNatService
+import com.orliczspace.mesh_link.network.vpn.MeshVpnService
 import com.orliczspace.mesh_link.ui.navigation.Routes
 import com.orliczspace.mesh_link.ui.scaffold.MeshScaffold
 import kotlinx.coroutines.delay
@@ -58,41 +61,34 @@ fun DashboardScreen(
      */
     val refreshKey = dashboardRefresh
 
-    /*
-     * Internet status.
-     */
+    // VPN setup error.
+    val vpnErrorMessage = MeshVpnService.vpnErrorMessage
+
+    // Internet status.
     val isInternetConnected =
         internetMonitor.isConnected.value
 
     val connectionType =
         internetMonitor.connectionType.value
 
-    /*
-     * Wi-Fi Direct discovered peers.
-     */
+    // Wi-Fi Direct discovered peers.
     val discoveredNodeCount =
         neighbourService.discoveredPeers.size
 
-    /*
-     * Nodes discovered through the UDP probe layer.
-     */
+    val discoveryStatus =
+        neighbourService.discoveryStatus
+
+    // Nodes discovered through the UDP probe layer.
     val probeNodes =
         linkProbeService.getKnownPeers()
 
-    /*
-     * Nodes currently represented in the routing table.
-     */
+    // Nodes currently represented in the routing table.
     val routingNodes =
         routingRepository.routingTable
 
     /*
-     * Prefer routing nodes because they have actual
-     * routing state.
-     *
-     * If routing has not been populated yet, use
-     * probe-known nodes.
-     *
-     * Finally fall back to Wi-Fi Direct discovery.
+     * Connected-node metric.
+     * This retains the existing dashboard calculation.
      */
     val connectedNodes =
         when {
@@ -106,26 +102,19 @@ fun DashboardScreen(
                 discoveredNodeCount
         }
 
-    /*
-     * Routing latency values.
-     */
+    // Routing latency values.
     val routingLatencies =
         routingNodes.values
             .map { it.averageLatencyMs }
             .filter { it >= 0 }
 
-    /*
-     * Probe RTT values.
-     */
+    // Probe RTT values.
     val probeLatencies =
-        probeNodes.keys
-            .mapNotNull { nodeId ->
-                linkProbeService.getAverageRtt(nodeId)
-            }
+        probeNodes.keys.mapNotNull { nodeId ->
+            linkProbeService.getAverageRtt(nodeId)
+        }
 
-    /*
-     * Average network latency.
-     */
+    // Average network latency.
     val latency =
         when {
             routingLatencies.isNotEmpty() ->
@@ -138,9 +127,7 @@ fun DashboardScreen(
                 0
         }
 
-    /*
-     * Number of currently elected gateways.
-     */
+    // Number of currently elected gateways.
     val gateways =
         routingNodes.values.count {
             it.isGateway
@@ -148,86 +135,90 @@ fun DashboardScreen(
 
     /*
      * Internet metric:
-     *
      * 1 = Internet available
      * 0 = Internet unavailable
      */
     val internet =
-        if (isInternetConnected) {
-            1
-        } else {
-            0
+        if (isInternetConnected) 1 else 0
+
+    /*
+     * Dashboard loading state.
+     *
+     * Failed or stopped discovery is not treated
+     * as an ongoing loading operation.
+     */
+    val dashboardLoadingState: DashboardLoadingState? =
+        when {
+            discoveryStatus ==
+                    PeerDiscoveryStatus.INITIALIZING -> {
+                DashboardLoadingState.INITIALIZING
+            }
+
+            routingNodes.isNotEmpty() &&
+                    gateways == 0 -> {
+                DashboardLoadingState.SELECTING_GATEWAY
+            }
+
+            gateways > 0 &&
+                    !isInternetConnected -> {
+                DashboardLoadingState.CONNECTING
+            }
+
+            routingNodes.isEmpty() &&
+                    (
+                            discoveredNodeCount > 0 ||
+                                    probeNodes.isNotEmpty()
+                            ) -> {
+                DashboardLoadingState.ESTABLISHING_MESH
+            }
+
+            discoveryStatus ==
+                    PeerDiscoveryStatus.DISCOVERING &&
+                    discoveredNodeCount == 0 -> {
+                DashboardLoadingState.DISCOVERING_PEERS
+            }
+
+            else -> null
         }
 
     /*
      * Keep the refresh value referenced so Compose
-     * continues to re-read the non-observable service state.
+     * re-reads non-observable service state.
      */
     @Suppress("UNUSED_VARIABLE")
-    val currentRefresh =
-        refreshKey
+    val currentRefresh = refreshKey
 
     MeshScaffold(
         title = "Dashboard",
         navController = navController,
         currentRoute = Routes.Dashboard.route
     ) { padding ->
-
         DashboardContent(
             padding = padding,
-
-            isInternetConnected =
-                isInternetConnected,
-
-            connectionType =
-                connectionType,
-
-            connectedNodes =
-                connectedNodes,
-
-            latency =
-                latency,
-
-            gateways =
-                gateways,
-
-            internet =
-                internet,
-
-            neighbourService =
-                neighbourService,
-
-            linkProbeService =
-                linkProbeService,
-
-            routingRepository =
-                routingRepository,
-
-            gatewayNatService =
-                gatewayNatService,
-
+            isInternetConnected = isInternetConnected,
+            connectionType = connectionType,
+            connectedNodes = connectedNodes,
+            latency = latency,
+            gateways = gateways,
+            internet = internet,
+            dashboardLoadingState = dashboardLoadingState,
+            discoveryStatus = discoveryStatus,
+            vpnErrorMessage = vpnErrorMessage,
+            neighbourService = neighbourService,
+            linkProbeService = linkProbeService,
+            routingRepository = routingRepository,
+            gatewayNatService = gatewayNatService,
             onFindNodesClick = {
-                navController.navigate(
-                    Routes.Nodes.route
-                )
+                navController.navigate(Routes.Nodes.route)
             },
-
             onDiagnosticsClick = {
-                navController.navigate(
-                    Routes.Performance.route
-                )
+                navController.navigate(Routes.Performance.route)
             },
-
             onTopologyClick = {
-                navController.navigate(
-                    Routes.Topology.route
-                )
+                navController.navigate(Routes.Topology.route)
             },
-
             onRoutesClick = {
-                navController.navigate(
-                    Routes.Routing.route
-                )
+                navController.navigate(Routes.Routing.route)
             }
         )
     }
@@ -242,6 +233,9 @@ private fun DashboardContent(
     latency: Int,
     gateways: Int,
     internet: Int,
+    dashboardLoadingState: DashboardLoadingState?,
+    discoveryStatus: PeerDiscoveryStatus,
+    vpnErrorMessage: String?,
     neighbourService: NeighbourDiscoveryService,
     linkProbeService: LinkProbeService,
     routingRepository: RoutingStateRepository,
@@ -255,17 +249,14 @@ private fun DashboardContent(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding),
-
         contentPadding = PaddingValues(
             start = 16.dp,
             top = 16.dp,
             end = 16.dp,
             bottom = 24.dp
         ),
-
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-
         item {
             DashboardHeader()
         }
@@ -277,6 +268,64 @@ private fun DashboardContent(
             )
         }
 
+        // Card 11: VPN setup error.
+        item {
+            vpnErrorMessage?.let { errorMessage ->
+                DashboardErrorState(
+                    title = "VPN setup failed",
+                    message = errorMessage
+                )
+            }
+        }
+
+
+        // Card 11: Gateway failure.
+        item {
+            routingRepository.gatewayErrorMessage?.let { errorMessage ->
+                DashboardErrorState(
+                    title = "Gateway unavailable",
+                    message = errorMessage
+                )
+            }
+        }
+
+        // Card 10: Internet empty state.
+        item {
+            if (!isInternetConnected) {
+                DashboardEmptyState(
+                    title = "No Internet connection",
+                    message = "Internet connectivity is not currently detected. Check your device connection or the mesh gateway."
+                )
+            }
+        }
+
+        // Card 11: Route failure.
+        item {
+            routingRepository.routeErrorMessage?.let { errorMessage ->
+                DashboardErrorState(
+                    title = "Route failure",
+                    message = errorMessage
+                )
+            }
+        }
+
+        // Dashboard loading state.
+        item {
+            dashboardLoadingState?.let { state ->
+                DashboardLoadingSection(state = state)
+            }
+        }
+
+        // Card 11: Peer discovery error.
+        item {
+            if (discoveryStatus == PeerDiscoveryStatus.FAILED) {
+                DashboardErrorState(
+                    title = "Peer discovery failed",
+                    message = "Mesh-link could not start or continue Wi-Fi Direct discovery. Check Wi-Fi, nearby-device permissions, and location permissions where required, then try discovery again."
+                )
+            }
+        }
+
         item {
             MetricsSection(
                 connectedNodes = connectedNodes,
@@ -284,6 +333,19 @@ private fun DashboardContent(
                 gateways = gateways,
                 internet = internet
             )
+        }
+
+        // Card 10: Routing empty state.
+        item {
+            if (
+                routingRepository.routingTable.isEmpty() &&
+                dashboardLoadingState == null
+            ) {
+                DashboardEmptyState(
+                    title = "No routes available",
+                    message = "The routing table is empty. Discover peers and establish mesh connections to make routes available."
+                )
+            }
         }
 
         item {
@@ -308,17 +370,10 @@ private fun DashboardContent(
 
         item {
             QuickActionsSection(
-                onFindNodesClick =
-                    onFindNodesClick,
-
-                onDiagnosticsClick =
-                    onDiagnosticsClick,
-
-                onTopologyClick =
-                    onTopologyClick,
-
-                onRoutesClick =
-                    onRoutesClick
+                onFindNodesClick = onFindNodesClick,
+                onDiagnosticsClick = onDiagnosticsClick,
+                onTopologyClick = onTopologyClick,
+                onRoutesClick = onRoutesClick
             )
         }
 

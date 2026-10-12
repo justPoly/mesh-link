@@ -129,7 +129,10 @@ fun NearbyNodesSection(
         }
 
         if (nodes.isEmpty()) {
-            EmptyNearbyNodesCard()
+            DashboardEmptyState(
+                title = "No nearby nodes",
+                message = "Start discovery to find nearby mesh devices."
+            )
         } else {
             nodes
                 .take(5)

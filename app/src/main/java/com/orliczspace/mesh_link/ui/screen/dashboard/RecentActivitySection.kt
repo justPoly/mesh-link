@@ -51,7 +51,10 @@ fun RecentActivitySection() {
         )
 
         if (activities.isEmpty()) {
-            EmptyActivityCard()
+            DashboardEmptyState(
+                title = "No recent activity",
+                message = "Network events will appear here as they occur."
+            )
         } else {
 
             activities

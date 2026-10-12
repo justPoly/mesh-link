@@ -45,7 +45,10 @@ fun GatewaySection(
         )
 
         if (gateway == null) {
-            NoGatewayCard()
+            DashboardEmptyState(
+                title = "No gateway available",
+                message = "No active mesh gateway has been selected. Check peer discovery and gateway election."
+            )
         } else {
             val nodeId = gateway.key
             val state = gateway.value
