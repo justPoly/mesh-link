@@ -1,13 +1,21 @@
 package com.orliczspace.mesh_link.network
 
 import android.Manifest
-import android.content.*
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.NetworkInfo
-import android.net.wifi.p2p.*
+import android.net.wifi.p2p.WifiP2pConfig
+import android.net.wifi.p2p.WifiP2pDevice
+import android.net.wifi.p2p.WifiP2pManager
 import android.util.Log
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 
 /**
@@ -15,72 +23,112 @@ import androidx.core.content.ContextCompat
  * using Wi-Fi Direct (Wi-Fi P2P).
  *
  * Exposes:
- *  - discoveredPeers  → UI discovery
- *  - connectedPeers   → routing / probing layer
+ * - discoveredPeers: devices discovered through Wi-Fi Direct
+ * - connectedPeers: Wi-Fi Direct group connection information
+ * - discoveryStatus: observable peer-discovery lifecycle
  */
+enum class PeerDiscoveryStatus {
+    INITIALIZING,
+    DISCOVERING,
+    PEERS_FOUND,
+    FAILED,
+    STOPPED
+}
+
 class NeighbourDiscoveryService(
     private val context: Context
 ) {
 
+    companion object {
+        private const val TAG = "NeighbourDiscovery"
+    }
+
+    var discoveryStatus by mutableStateOf(
+        PeerDiscoveryStatus.INITIALIZING
+    )
+        private set
+
     private val manager =
-        context.getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
+        context.getSystemService(
+            Context.WIFI_P2P_SERVICE
+        ) as WifiP2pManager
 
     private val channel =
-        manager.initialize(context, context.mainLooper, null)
+        manager.initialize(
+            context,
+            context.mainLooper,
+            null
+        )
 
-    /* ---------------- DISCOVERY ---------------- */
+    // ---------------------------------------------------------
+    // DISCOVERY STATE
+    // ---------------------------------------------------------
 
-    /** Device names only (UI-level) */
+    /**
+     * Device names discovered through Wi-Fi Direct.
+     */
     val discoveredPeers = mutableStateListOf<String>()
 
-    private val peerListListener = WifiP2pManager.PeerListListener { peers ->
+    private val peerListListener =
+        WifiP2pManager.PeerListListener { peers ->
 
-        val previousPeers = discoveredPeers.toSet()
+            val currentPeers = peers.deviceList.map { device ->
+                device.deviceName ?: "Unknown Device"
+            }
 
-        val currentPeers =
-            peers.deviceList
-                .map { device ->
-                    device.deviceName ?: "Unknown Device"
+            discoveredPeers.clear()
+            discoveredPeers.addAll(currentPeers)
+
+            discoveryStatus =
+                if (currentPeers.isNotEmpty()) {
+                    PeerDiscoveryStatus.PEERS_FOUND
+                } else {
+                    PeerDiscoveryStatus.DISCOVERING
                 }
-                .toSet()
 
-        discoveredPeers.clear()
-        discoveredPeers.addAll(currentPeers)
-
-        val newlyDiscovered =
-            currentPeers - previousPeers
-
-        newlyDiscovered.forEach { deviceName ->
-            NetworkActivityLog.record(
-                message = "Node discovered",
-                detail = deviceName
+            Log.d(
+                TAG,
+                "Peers found: ${discoveredPeers.size}"
             )
         }
 
-        Log.d(
-            "NeighbourDiscovery",
-            "Peers found: ${discoveredPeers.size}"
-        )
-    }
-
-    /* ---------------- ROUTING-LEVEL STATE ---------------- */
+    // ---------------------------------------------------------
+    // ROUTING-LEVEL STATE
+    // ---------------------------------------------------------
 
     /**
-     * Connected peers with real IP addresses.
-     * This is what LinkProbeService consumes.
+     * Wi-Fi Direct group information.
      *
-     * key   → nodeId (string)
-     * value → IP address
+     * Key: role (GO or CLIENT)
+     * Value: group owner's IP address
+     *
+     * This is connection information, not a complete list
+     * of every connected mesh node.
      */
-    val connectedPeers = mutableStateMapOf<String, String>()
+    val connectedPeers =
+        mutableStateMapOf<String, String>()
 
     private val connectionInfoListener =
         WifiP2pManager.ConnectionInfoListener { info ->
 
-            if (!info.groupFormed) return@ConnectionInfoListener
+            if (!info.groupFormed) {
+                Log.d(
+                    TAG,
+                    "Wi-Fi Direct group is not formed"
+                )
+                return@ConnectionInfoListener
+            }
 
-            val groupOwnerIp = info.groupOwnerAddress?.hostAddress ?: return@ConnectionInfoListener
-            val role = if (info.isGroupOwner) "GO" else "CLIENT"
+            val groupOwnerIp =
+                info.groupOwnerAddress?.hostAddress
+                    ?: return@ConnectionInfoListener
+
+            val role =
+                if (info.isGroupOwner) {
+                    "GO"
+                } else {
+                    "CLIENT"
+                }
 
             val previousConnection =
                 connectedPeers[role]
@@ -96,134 +144,276 @@ class NeighbourDiscoveryService(
             }
 
             Log.d(
-                "NeighbourDiscovery",
+                TAG,
                 "Connected → role=$role | ip=$groupOwnerIp"
             )
         }
 
-    /* ---------------- BROADCAST RECEIVER ---------------- */
+    // ---------------------------------------------------------
+    // BROADCAST RECEIVER
+    // ---------------------------------------------------------
 
     private val receiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
+
+        override fun onReceive(
+            context: Context?,
+            intent: Intent?
+        ) {
 
             when (intent?.action) {
 
                 WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> {
+
                     val state = intent.getIntExtra(
                         WifiP2pManager.EXTRA_WIFI_STATE,
                         WifiP2pManager.WIFI_P2P_STATE_DISABLED
                     )
-                    Log.d("NeighbourDiscovery", "Wi-Fi P2P state: $state")
+
+                    Log.d(
+                        TAG,
+                        "Wi-Fi P2P state: $state"
+                    )
                 }
 
                 WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> {
+
                     if (hasRequiredPermissions()) {
                         try {
-                            manager.requestPeers(channel, peerListListener)
+                            manager.requestPeers(
+                                channel,
+                                peerListListener
+                            )
                         } catch (e: SecurityException) {
-                            Log.e("NeighbourDiscovery", "requestPeers denied")
+                            discoveryStatus =
+                                PeerDiscoveryStatus.FAILED
+
+                            Log.e(
+                                TAG,
+                                "requestPeers denied",
+                                e
+                            )
                         }
                     }
                 }
 
                 WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
+
                     val networkInfo =
                         intent.getParcelableExtra<NetworkInfo>(
                             WifiP2pManager.EXTRA_NETWORK_INFO
                         )
 
-                    if (networkInfo?.isConnected == true && hasRequiredPermissions()) {
+                    if (
+                        networkInfo?.isConnected == true &&
+                        hasRequiredPermissions()
+                    ) {
                         try {
-                            manager.requestConnectionInfo(channel, connectionInfoListener)
+                            manager.requestConnectionInfo(
+                                channel,
+                                connectionInfoListener
+                            )
                         } catch (e: SecurityException) {
-                            Log.e("NeighbourDiscovery", "requestConnectionInfo denied")
+                            Log.e(
+                                TAG,
+                                "requestConnectionInfo denied",
+                                e
+                            )
                         }
+                    } else {
+                        connectedPeers.clear()
+
+                        Log.d(
+                            TAG,
+                            "Wi-Fi Direct connection unavailable"
+                        )
                     }
                 }
             }
         }
     }
 
-    /* ---------------- PERMISSIONS ---------------- */
+    // ---------------------------------------------------------
+    // PERMISSIONS
+    // ---------------------------------------------------------
 
     private fun hasRequiredPermissions(): Boolean {
-        val fineLocation = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
+
+        val fineLocation =
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
 
         val nearbyPermission =
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (
+                android.os.Build.VERSION.SDK_INT >=
+                android.os.Build.VERSION_CODES.TIRAMISU
+            ) {
                 ContextCompat.checkSelfPermission(
                     context,
                     Manifest.permission.NEARBY_WIFI_DEVICES
                 ) == PackageManager.PERMISSION_GRANTED
-            } else true
+            } else {
+                true
+            }
 
         return fineLocation && nearbyPermission
     }
 
-    /* ---------------- START DISCOVERY ---------------- */
+    // ---------------------------------------------------------
+    // START DISCOVERY
+    // ---------------------------------------------------------
 
     fun startDiscovery() {
+
         if (!hasRequiredPermissions()) {
-            Log.e("NeighbourDiscovery", "Missing Wi-Fi Direct permissions")
+            discoveryStatus =
+                PeerDiscoveryStatus.FAILED
+
+            Log.e(
+                TAG,
+                "Missing Wi-Fi Direct permissions"
+            )
             return
         }
 
+        discoveryStatus =
+            PeerDiscoveryStatus.DISCOVERING
+
         val filter = IntentFilter().apply {
-            addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
-            addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
-            addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
+            addAction(
+                WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION
+            )
+            addAction(
+                WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION
+            )
+            addAction(
+                WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION
+            )
         }
 
-        context.registerReceiver(receiver, filter)
+        try {
+            context.registerReceiver(
+                receiver,
+                filter
+            )
+        } catch (e: Exception) {
+            Log.w(
+                TAG,
+                "Receiver registration: ${e.message}"
+            )
+        }
 
         try {
-            manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    Log.d("NeighbourDiscovery", "Discovery started")
-                }
+            manager.discoverPeers(
+                channel,
+                object : WifiP2pManager.ActionListener {
 
-                override fun onFailure(reason: Int) {
-                    Log.e("NeighbourDiscovery", "Discovery failed: $reason")
+                    override fun onSuccess() {
+                        discoveryStatus =
+                            if (discoveredPeers.isNotEmpty()) {
+                                PeerDiscoveryStatus.PEERS_FOUND
+                            } else {
+                                PeerDiscoveryStatus.DISCOVERING
+                            }
+
+                        Log.d(
+                            TAG,
+                            "Discovery started"
+                        )
+                    }
+
+                    override fun onFailure(reason: Int) {
+                        discoveryStatus =
+                            PeerDiscoveryStatus.FAILED
+
+                        Log.e(
+                            TAG,
+                            "Discovery failed: $reason"
+                        )
+                    }
                 }
-            })
+            )
         } catch (e: SecurityException) {
-            Log.e("NeighbourDiscovery", "discoverPeers denied")
+            discoveryStatus =
+                PeerDiscoveryStatus.FAILED
+
+            Log.e(
+                TAG,
+                "discoverPeers denied",
+                e
+            )
         }
     }
 
-    /* ---------------- CONNECT ---------------- */
+    // ---------------------------------------------------------
+    // CONNECT TO PEER
+    // ---------------------------------------------------------
 
-    fun connectToPeer(device: WifiP2pDevice) {
-        if (!hasRequiredPermissions()) return
+    fun connectToPeer(
+        device: WifiP2pDevice
+    ) {
+
+        if (!hasRequiredPermissions()) {
+            Log.e(
+                TAG,
+                "Cannot connect: missing permissions"
+            )
+            return
+        }
 
         val config = WifiP2pConfig().apply {
             deviceAddress = device.deviceAddress
         }
 
         try {
-            manager.connect(channel, config, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    Log.d("NeighbourDiscovery", "Connection initiated")
-                }
+            manager.connect(
+                channel,
+                config,
+                object : WifiP2pManager.ActionListener {
 
-                override fun onFailure(reason: Int) {
-                    Log.e("NeighbourDiscovery", "Connection failed: $reason")
+                    override fun onSuccess() {
+                        Log.d(
+                            TAG,
+                            "Connection initiated: ${device.deviceName}"
+                        )
+                    }
+
+                    override fun onFailure(reason: Int) {
+                        Log.e(
+                            TAG,
+                            "Connection failed: $reason"
+                        )
+                    }
                 }
-            })
+            )
         } catch (e: SecurityException) {
-            Log.e("NeighbourDiscovery", "connect denied")
+            Log.e(
+                TAG,
+                "connect denied",
+                e
+            )
         }
     }
 
-    /* ---------------- STOP ---------------- */
+    // ---------------------------------------------------------
+    // STOP DISCOVERY
+    // ---------------------------------------------------------
 
     fun stopDiscovery() {
+
         try {
             context.unregisterReceiver(receiver)
         } catch (_: Exception) {
+            // Receiver may already be unregistered.
         }
+
+        discoveryStatus =
+            PeerDiscoveryStatus.STOPPED
+
+        Log.d(
+            TAG,
+            "Discovery stopped"
+        )
     }
 }
