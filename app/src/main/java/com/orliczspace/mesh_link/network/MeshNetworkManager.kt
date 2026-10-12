@@ -1,13 +1,17 @@
+
 package com.orliczspace.mesh_link.network
 
 import android.util.Log
 import com.orliczspace.mesh_link.network.packet.MeshPacket
 import com.orliczspace.mesh_link.network.packet.PacketType
 import com.orliczspace.mesh_link.network.security.CryptoManager
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.net.DatagramSocket
 import java.net.InetAddress
-import java.nio.ByteBuffer
 import java.security.KeyPair
 import java.util.concurrent.ConcurrentHashMap
 
@@ -16,155 +20,243 @@ class MeshNetworkManager(
     private val socket: DatagramSocket,
     private val packetForwarder: PacketForwarder
 ) {
-
     companion object {
         private const val TAG = "MeshNetworkManager"
     }
 
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
-    // Neighbor sessions: neighborId -> Session
-    private val sessions = ConcurrentHashMap<String, Session>()
-
-    // Replay protection: neighborId -> last counter seen
-    private val replayCounters = ConcurrentHashMap<String, Long>()
+    private val scope =
+        CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     data class Session(
         val keyPair: KeyPair,
-        var sharedSecret: ByteArray? = null
+        @Volatile var sharedSecret: ByteArray? = null
     )
 
-    /** ------------------ Key Exchange ------------------ */
+    private val sessions = ConcurrentHashMap<String, Session>()
+
+    // Keep transmit and receive counters independent.
+    private val outgoingCounters = ConcurrentHashMap<String, Long>()
+    private val incomingCounters = ConcurrentHashMap<String, Long>()
 
     fun initiateKeyExchange(neighborId: String) {
-        val keyPair = CryptoManager.generateDHKeyPair()
-        sessions[neighborId] = Session(keyPair)
+        if (neighborId.isBlank() || neighborId == localNodeId) return
 
-        // Send public key to neighbor
-        val packet = MeshPacket(
-            sourceNodeId = localNodeId,
-            destinationNodeId = neighborId,
-            payload = keyPair.public.encoded,
-            type = PacketType.KEY_EXCHANGE
-        )
-
-        sendPacket(packet)
-        Log.d(TAG, "Initiated DH key exchange with $neighborId")
-    }
-
-    fun processKeyExchangeMessage(fromNode: String, publicKeyBytes: ByteArray) {
-        val session = sessions.getOrPut(fromNode) {
-            Session(CryptoManager.generateDHKeyPair())
+        val existing = sessions[neighborId]
+        if (existing?.sharedSecret != null) {
+            Log.d(TAG, "Secure session already exists with $neighborId")
+            return
         }
 
-        // Compute shared secret
-        session.sharedSecret = CryptoManager.computeSharedSecret(
-            session.keyPair.private,
-            publicKeyBytes
-        )
+        val session = existing ?: Session(CryptoManager.generateDHKeyPair())
+            .also { sessions[neighborId] = it }
 
-        // If we haven't sent our public key yet, send it
-        if (session.keyPair.public.encoded.isNotEmpty()) {
-            val reply = MeshPacket(
+        sendPacket(
+            MeshPacket(
                 sourceNodeId = localNodeId,
-                destinationNodeId = fromNode,
+                destinationNodeId = neighborId,
                 payload = session.keyPair.public.encoded,
                 type = PacketType.KEY_EXCHANGE
             )
-            sendPacket(reply)
-        }
+        )
 
-        Log.d(TAG, "Established secure session with $fromNode")
+        Log.d(TAG, "Initiated key exchange with $neighborId")
     }
 
-    /** ------------------ Sending Packets ------------------ */
+    fun processKeyExchangeMessage(
+        fromNode: String,
+        publicKeyBytes: ByteArray
+    ) {
+        if (fromNode.isBlank() || fromNode == localNodeId) return
+
+        try {
+            var shouldReply = false
+
+            val session = synchronized(sessions) {
+                sessions[fromNode] ?: Session(
+                    CryptoManager.generateDHKeyPair()
+                ).also {
+                    sessions[fromNode] = it
+                    shouldReply = true
+                }
+            }
+
+            val secret = CryptoManager.computeSharedSecret(
+                session.keyPair.private,
+                publicKeyBytes
+            )
+
+            session.sharedSecret = secret
+
+            // Reply only when creating a session for an incoming request.
+            // An established session must not reply forever to each key packet.
+            if (shouldReply) {
+                sendPacket(
+                    MeshPacket(
+                        sourceNodeId = localNodeId,
+                        destinationNodeId = fromNode,
+                        payload = session.keyPair.public.encoded,
+                        type = PacketType.KEY_EXCHANGE
+                    )
+                )
+            }
+
+            Log.d(TAG, "Secure session established with $fromNode")
+        } catch (e: Exception) {
+            Log.e(TAG, "Key exchange failed with $fromNode", e)
+        }
+    }
 
     fun sendSecurePacket(
         neighborId: String,
         plainPayload: ByteArray,
         packetType: PacketType = PacketType.DATA
     ) {
-        val session = sessions[neighborId]?.sharedSecret
-            ?: run {
-                Log.w(TAG, "No secure session with $neighborId")
-                initiateKeyExchange(neighborId)
-                return
-            }
+        val session = sessions[neighborId]
 
-        // Increment replay counter
-        val counter = (replayCounters[neighborId] ?: 0L) + 1
-        replayCounters[neighborId] = counter
+        if (session?.sharedSecret == null) {
+            Log.w(TAG, "No secure session with $neighborId; starting exchange")
 
-        val encrypted = CryptoManager.encrypt(plainPayload, session, counter)
+            initiateKeyExchange(neighborId)
+            return
+        }
 
-        val packet = MeshPacket(
-            sourceNodeId = localNodeId,
-            destinationNodeId = neighborId,
-            payload = encrypted,
-            type = packetType,
-            encrypted = true
-        )
+        try {
+            val counter = outgoingCounters.merge(
+                neighborId,
+                1L
+            ) { old, increment -> old + increment } ?: 1L
 
-        sendPacket(packet)
+            val encrypted = CryptoManager.encrypt(
+                plainPayload,
+                session.sharedSecret!!,
+                counter
+            )
+
+            sendPacket(
+                MeshPacket(
+                    sourceNodeId = localNodeId,
+                    destinationNodeId = neighborId,
+                    payload = encrypted,
+                    type = packetType,
+                    seqNumber = counter,
+                    encrypted = true
+                )
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Secure send failed to $neighborId", e)
+        }
     }
 
     private fun sendPacket(packet: MeshPacket) {
         scope.launch {
             try {
+                // PacketForwarder now sends serialized packets directly.
                 packetForwarder.forward(packet)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to send packet to ${packet.destinationNodeId}", e)
+                Log.e(
+                    TAG,
+                    "Failed to send packet to ${packet.destinationNodeId}",
+                    e
+                )
             }
         }
     }
 
-    /** ------------------ Receiving Packets ------------------ */
-
-    fun onPacketReceived(packet: MeshPacket, sender: InetAddress) {
+    fun onPacketReceived(
+        packet: MeshPacket,
+        sender: InetAddress
+    ) {
         scope.launch {
             try {
+                if (packet.destinationNodeId != null &&
+                    packet.destinationNodeId != localNodeId
+                ) {
+                    Log.w(TAG, "Packet addressed to another node; ignoring")
+                    return@launch
+                }
+
                 when (packet.type) {
                     PacketType.KEY_EXCHANGE -> {
-                        processKeyExchangeMessage(packet.sourceNodeId, packet.payload)
+                        processKeyExchangeMessage(
+                            packet.sourceNodeId,
+                            packet.payload
+                        )
                     }
 
                     PacketType.DATA -> {
+                        var payload = packet.payload
+
                         if (packet.encrypted) {
-                            val session = sessions[packet.sourceNodeId]?.sharedSecret
-                            if (session == null) {
-                                Log.w(TAG, "No session with ${packet.sourceNodeId}, dropping packet")
+                            val key = sessions[
+                                packet.sourceNodeId
+                            ]?.sharedSecret
+
+                            if (key == null) {
+                                Log.w(
+                                    TAG,
+                                    "No secure session with ${packet.sourceNodeId}"
+                                )
                                 return@launch
                             }
 
-                            // Check replay counter
-                            val counter = extractCounter(packet.payload)
-                            val lastCounter = replayCounters[packet.sourceNodeId] ?: 0L
-                            if (counter <= lastCounter) {
-                                Log.w(TAG, "Replay packet detected from ${packet.sourceNodeId}")
+                            val decrypted =
+                                CryptoManager.decryptWithCounter(
+                                    packet.payload,
+                                    key
+                                )
+
+                            val previous =
+                                incomingCounters[packet.sourceNodeId] ?: 0L
+
+                            if (decrypted.counter <= previous) {
+                                Log.w(
+                                    TAG,
+                                    "Rejected replay from ${packet.sourceNodeId}"
+                                )
                                 return@launch
                             }
-                            replayCounters[packet.sourceNodeId] = counter
 
-                            val decrypted = CryptoManager.decrypt(packet.payload, session)
-                            val securePacket = packet.copy(payload = decrypted, encrypted = false)
-                            packetForwarder.deliveryListener?.onPacketDelivered(securePacket.payload)
-                        } else {
-                            packetForwarder.deliveryListener?.onPacketDelivered(packet.payload)
+                            incomingCounters[packet.sourceNodeId] =
+                                decrypted.counter
+
+                            payload = decrypted.plaintext
                         }
+
+                        packetForwarder.deliveryListener
+                            ?.onPacketDelivered(payload)
+
+                        Log.d(
+                            TAG,
+                            "Delivered DATA from ${packet.sourceNodeId} " +
+                                    "(${payload.size} bytes)"
+                        )
                     }
 
                     else -> {
-                        packetForwarder.onDatagramReceived(packet.payload, packet.payload.size, sender, 0)
+                        Log.d(
+                            TAG,
+                            "Received ${packet.type} from ${packet.sourceNodeId}; " +
+                                    "handler not implemented yet"
+                        )
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error processing packet from ${packet.sourceNodeId}", e)
+                Log.e(
+                    TAG,
+                    "Error processing packet from ${packet.sourceNodeId}",
+                    e
+                )
             }
         }
     }
 
-    private fun extractCounter(payload: ByteArray): Long {
-        // AES-GCM prepends 12-byte IV + 8-byte counter
-        return ByteBuffer.wrap(payload, 12, 8).long
+    fun stop() {
+        scope.cancel()
+        sessions.clear()
+        outgoingCounters.clear()
+        incomingCounters.clear()
+
+        // The socket is shared with PacketForwarder.
+        // Its owner should close it through PacketForwarder.stop().
     }
 }

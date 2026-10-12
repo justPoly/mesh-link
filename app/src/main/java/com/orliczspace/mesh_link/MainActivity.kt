@@ -261,6 +261,29 @@ class MainActivity : ComponentActivity() {
 
         packetForwarder.localNodeId = localNodeId
         packetForwarder.startReceiver()
+
+        linkProbeService.onPeerDiscovered = { nodeId, ipAddress ->
+            try {
+                val address = java.net.InetAddress.getByName(ipAddress)
+
+                packetForwarder.registerPeerAddress(
+                    nodeId = nodeId,
+                    address = address,
+                    port = 9999
+                )
+
+                Log.d(
+                    TAG,
+                    "Mesh peer registered: $nodeId -> $ipAddress:9999"
+                )
+            } catch (e: Exception) {
+                Log.e(
+                    TAG,
+                    "Could not register mesh peer $nodeId at $ipAddress",
+                    e
+                )
+            }
+        }
     }
 
     private fun startNeighbourDiscovery() {
