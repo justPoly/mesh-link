@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 
+import com.orliczspace.mesh_link.network.NodeIdentity
 import com.orliczspace.mesh_link.network.AdaptiveProbeScheduler
 import com.orliczspace.mesh_link.network.LinkProbeService
 import com.orliczspace.mesh_link.network.MeshNetworkManager
@@ -174,8 +175,9 @@ class MainActivity : ComponentActivity() {
      */
     private fun initializeNetworking() {
 
-        val localNodeId =
-            Build.MODEL ?: "unknown-node"
+        val localNodeId = NodeIdentity.getOrCreate(applicationContext)
+
+        Log.d(TAG, "Persistent Mesh-link Node ID: $localNodeId")
 
         /*
          * Link probing
@@ -190,6 +192,12 @@ class MainActivity : ComponentActivity() {
          */
         adaptiveProbeScheduler =
             AdaptiveProbeScheduler(linkProbeService)
+
+
+        linkProbeService.onProbeResponse = { nodeId ->
+            adaptiveProbeScheduler.notifyResponse(nodeId)
+        }
+
 
         /*
          * Routing
@@ -226,7 +234,7 @@ class MainActivity : ComponentActivity() {
         /*
          * Shared UDP socket
          */
-        val socket = DatagramSocket()
+        val socket = DatagramSocket(9999)
 
         /*
          * Packet forwarding
@@ -250,6 +258,9 @@ class MainActivity : ComponentActivity() {
 
         packetForwarder.meshNetworkManager =
             meshNetworkManager
+
+        packetForwarder.localNodeId = localNodeId
+        packetForwarder.startReceiver()
     }
 
     private fun startNeighbourDiscovery() {
@@ -355,6 +366,10 @@ class MainActivity : ComponentActivity() {
 
         runCatching {
             unbindService(vpnConnection)
+        }
+
+        if (::packetForwarder.isInitialized) {
+            packetForwarder.stop()
         }
 
         super.onDestroy()

@@ -35,12 +35,21 @@ enum class PeerDiscoveryStatus {
     STOPPED
 }
 
+
 class NeighbourDiscoveryService(
     private val context: Context
 ) {
 
     companion object {
         private const val TAG = "NeighbourDiscovery"
+    }
+
+    /**
+     * Persistent identity for this Mesh-link installation.
+     * Generated once and reused across app restarts.
+     */
+    val localNodeId: String by lazy {
+        NodeIdentity.getOrCreate(context.applicationContext)
     }
 
     var discoveryStatus by mutableStateOf(
@@ -279,6 +288,11 @@ class NeighbourDiscoveryService(
 
         discoveryStatus =
             PeerDiscoveryStatus.DISCOVERING
+
+        Log.d(
+            TAG,
+            "Local Mesh-link Node ID: $localNodeId"
+        )
 
         val filter = IntentFilter().apply {
             addAction(

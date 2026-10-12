@@ -1,7 +1,12 @@
+
 package com.orliczspace.mesh_link.network.packet
 
-import java.nio.ByteBuffer
-import java.util.*
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.IOException
+import java.util.UUID
 
 data class MeshPacket(
     val packetId: String = UUID.randomUUID().toString(),
@@ -15,68 +20,92 @@ data class MeshPacket(
     val encrypted: Boolean = false,
     val ackForPacketId: String? = null
 ) {
-    /** Serialize packet into byte array (simple stub; you can improve encoding later) */
-    fun serialize(): ByteArray {
-        val idBytes = packetId.toByteArray()
-        val sourceBytes = sourceNodeId.toByteArray()
-        val destBytes = destinationNodeId?.toByteArray() ?: ByteArray(0)
-        val payloadSize = payload.size
-        val buffer = ByteBuffer.allocate(
-            4 + idBytes.size + 4 + sourceBytes.size + 4 + destBytes.size + 4 + payloadSize + 1
-        )
-        buffer.putInt(idBytes.size)
-        buffer.put(idBytes)
-        buffer.putInt(sourceBytes.size)
-        buffer.put(sourceBytes)
-        buffer.putInt(destBytes.size)
-        buffer.put(destBytes)
-        buffer.putInt(payloadSize)
-        buffer.put(payload)
-        buffer.put(type.ordinal.toByte())
-        return buffer.array()
-    }
 
     companion object {
-        /** Deserialize byte array into MeshPacket */
+        private const val MAGIC = 0x4D53484C // "MSHL"
+        private const val VERSION = 1
+        private const val MAX_PACKET_SIZE = 65_507
+        private const val MAX_STRING_LENGTH = 4_096
+
         fun deserialize(data: ByteArray, length: Int): MeshPacket {
-            val buffer = ByteBuffer.wrap(data, 0, length)
+            require(length in 1..data.size) {
+                "Invalid packet length: $length"
+            }
+            require(length <= MAX_PACKET_SIZE) {
+                "Packet exceeds maximum UDP payload size"
+            }
 
-            val idLen = buffer.int
-            val idBytes = ByteArray(idLen)
-            buffer.get(idBytes)
-            val packetId = String(idBytes)
-
-            val sourceLen = buffer.int
-            val sourceBytes = ByteArray(sourceLen)
-            buffer.get(sourceBytes)
-            val sourceNodeId = String(sourceBytes)
-
-            val destLen = buffer.int
-            val destBytes = ByteArray(destLen)
-            buffer.get(destBytes)
-            val destinationNodeId = if (destLen > 0) String(destBytes) else null
-
-            val payloadLen = buffer.int
-            val payloadBytes = ByteArray(payloadLen)
-            buffer.get(payloadBytes)
-
-            val typeByte = buffer.get().toInt()
-            val type = PacketType.values()[typeByte]
-
-            return MeshPacket(
-                packetId = packetId,
-                sourceNodeId = sourceNodeId,
-                destinationNodeId = destinationNodeId,
-                payload = payloadBytes,
-                type = type
+            val input = DataInputStream(
+                ByteArrayInputStream(data, 0, length)
             )
+
+            try {
+                require(input.readInt() == MAGIC) {
+                    "Invalid mesh packet signature"
+                }
+
+                require(input.readUnsignedByte() == VERSION) {
+                    "Unsupported mesh packet version"
+                }
+
+                val packetId = input.readBoundedString()
+                val sourceNodeId = input.readBoundedString()
+                val destinationNodeId = input.readNullableString()
+
+                val ttl = input.readInt()
+                require(ttl in 0..255) {
+                    "Invalid packet TTL"
+                }
+
+                val seqNumber = input.readLong()
+                val requiresAck = input.readBoolean()
+                val encrypted = input.readBoolean()
+                val ackForPacketId = input.readNullableString()
+
+                val typeOrdinal = input.readUnsignedByte()
+                require(typeOrdinal < PacketType.entries.size) {
+                    "Invalid packet type: $typeOrdinal"
+                }
+
+                val payloadLength = input.readInt()
+                require(payloadLength >= 0 && payloadLength <= input.available()) {
+                    "Invalid payload length: $payloadLength"
+                }
+
+                val payload = ByteArray(payloadLength)
+                input.readFully(payload)
+
+                require(input.available() == 0) {
+                    "Unexpected trailing bytes in mesh packet"
+                }
+
+                return MeshPacket(
+                    packetId = packetId,
+                    sourceNodeId = sourceNodeId,
+                    destinationNodeId = destinationNodeId,
+                    payload = payload,
+                    ttl = ttl,
+                    type = PacketType.entries[typeOrdinal],
+                    seqNumber = seqNumber,
+                    requiresAck = requiresAck,
+                    encrypted = encrypted,
+                    ackForPacketId = ackForPacketId
+                )
+            } catch (e: IOException) {
+                throw IllegalArgumentException(
+                    "Malformed mesh packet",
+                    e
+                )
+            }
         }
 
-        /** Create an ACK packet */
-        fun createAck(sourceNodeId: String, packetId: String): MeshPacket {
+        fun createAck(
+            sourceNodeId: String,
+            packetId: String
+        ): MeshPacket {
             return MeshPacket(
                 sourceNodeId = sourceNodeId,
-                destinationNodeId = "unknown",
+                destinationNodeId = null,
                 payload = ByteArray(0),
                 type = PacketType.ACK,
                 requiresAck = false,
@@ -84,4 +113,62 @@ data class MeshPacket(
             )
         }
     }
+
+    fun serialize(): ByteArray {
+        val outputBytes = ByteArrayOutputStream()
+
+        DataOutputStream(outputBytes).use { output ->
+            output.writeInt(MAGIC)
+            output.writeByte(VERSION)
+
+            output.writeBoundedString(packetId)
+            output.writeBoundedString(sourceNodeId)
+            output.writeNullableString(destinationNodeId)
+
+            output.writeInt(ttl)
+            output.writeLong(seqNumber)
+            output.writeBoolean(requiresAck)
+            output.writeBoolean(encrypted)
+            output.writeNullableString(ackForPacketId)
+
+            output.writeByte(type.ordinal)
+
+            output.writeInt(payload.size)
+            output.write(payload)
+        }
+
+        val result = outputBytes.toByteArray()
+
+        require(result.size <= MAX_PACKET_SIZE) {
+            "Serialized mesh packet exceeds maximum UDP payload size"
+        }
+
+        return result
+    }
+}
+
+private fun DataOutputStream.writeBoundedString(value: String) {
+    require(value.toByteArray(Charsets.UTF_8).size <= 4_096) {
+        "Mesh packet string is too long"
+    }
+    writeUTF(value)
+}
+
+private fun DataOutputStream.writeNullableString(value: String?) {
+    writeBoolean(value != null)
+    if (value != null) {
+        writeBoundedString(value)
+    }
+}
+
+private fun DataInputStream.readBoundedString(): String {
+    val value = readUTF()
+    require(value.toByteArray(Charsets.UTF_8).size <= 4_096) {
+        "Mesh packet string is too long"
+    }
+    return value
+}
+
+private fun DataInputStream.readNullableString(): String? {
+    return if (readBoolean()) readBoundedString() else null
 }

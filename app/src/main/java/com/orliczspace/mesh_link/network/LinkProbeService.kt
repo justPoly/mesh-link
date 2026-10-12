@@ -108,28 +108,80 @@ class LinkProbeService(
         }
     }
 
-    private fun handleMessage(data: ByteArray, length: Int, address: InetAddress, port: Int) {
+
+    private fun handleMessage(
+        data: ByteArray,
+        length: Int,
+        address: InetAddress,
+        port: Int
+    ) {
         val message = try {
             ProbeCodec.decode(data, length)
         } catch (e: Exception) {
-            Log.e("LinkProbeService", "Invalid probe packet")
+            Log.e(
+                "LinkProbeService",
+                "Invalid probe packet",
+                e
+            )
+            return
+        }
+
+        // Reject invalid identities and messages originating from ourselves.
+        if (
+            message.senderId.isBlank() ||
+            message.senderId == localNodeId
+        ) {
+            Log.w(
+                "LinkProbeService",
+                "Ignoring invalid or self-sent probe"
+            )
             return
         }
 
         when (message.type) {
             ProbeMessage.Type.REQUEST -> {
-                registerPeer(message.senderId, address.hostAddress, message.capabilities)
-                sendProbeResponse(message, address, port)
+                registerPeer(
+                    message.senderId,
+                    address.hostAddress ?: return,
+                    message.capabilities
+                )
+
+                sendProbeResponse(
+                    message,
+                    address,
+                    port
+                )
             }
 
             ProbeMessage.Type.RESPONSE -> {
-                registerPeer(message.senderId, address.hostAddress, message.capabilities)
-                recordRtt(message.senderId, message.timestamp, System.currentTimeMillis())
-                pendingProbes.remove(message.sequence)
-                onProbeResponse?.invoke(message.senderId)
+                registerPeer(
+                    message.senderId,
+                    address.hostAddress ?: return,
+                    message.capabilities
+                )
+
+                // Use this device's own send time, not the remote clock.
+                val sentAt = pendingProbes.remove(message.sequence)
+
+                if (sentAt != null) {
+                    recordRtt(
+                        message.senderId,
+                        sentAt,
+                        System.currentTimeMillis()
+                    )
+
+                    onProbeResponse?.invoke(message.senderId)
+                } else {
+                    Log.d(
+                        "LinkProbeService",
+                        "Received response without a matching pending probe: " +
+                                message.senderId
+                    )
+                }
             }
         }
     }
+
 
     /* ---------------- RESPONSE ---------------- */
 
