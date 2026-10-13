@@ -12,6 +12,8 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun QuickActionsSection(
+    onDiscoverClick: () -> Unit,
+    onNodesClick: () -> Unit,
     onTopologyClick: () -> Unit,
     onRoutesClick: () -> Unit
 ) {
@@ -24,6 +26,8 @@ fun QuickActionsSection(
         Spacer(modifier = Modifier.height(16.dp))
 
         QuickActionsGrid(
+            onDiscoverClick = onDiscoverClick,
+            onNodesClick = onNodesClick,
             onTopologyClick = onTopologyClick,
             onRoutesClick = onRoutesClick
         )

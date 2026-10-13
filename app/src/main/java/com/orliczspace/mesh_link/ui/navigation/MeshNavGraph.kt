@@ -1,3 +1,4 @@
+
 package com.orliczspace.mesh_link.ui.navigation
 
 import androidx.compose.runtime.Composable
@@ -27,7 +28,6 @@ fun MeshNavGraph(
     neighbourService: NeighbourDiscoveryService,
     gatewayNatService: GatewayNatService
 ) {
-
     val navController = rememberNavController()
 
     NavHost(
@@ -35,9 +35,7 @@ fun MeshNavGraph(
         startDestination = Routes.Dashboard.route,
         modifier = modifier
     ) {
-
         composable(Routes.Dashboard.route) {
-
             DashboardScreen(
                 navController = navController,
                 linkProbeService = linkProbeService,
@@ -49,7 +47,11 @@ fun MeshNavGraph(
         }
 
         composable(Routes.Discovery.route) {
-            NodeDiscoveryScreen(navController)
+            NodeDiscoveryScreen(
+                navController = navController,
+                linkProbeService = linkProbeService,
+                neighbourService = neighbourService
+            )
         }
 
         composable(Routes.Nodes.route) {

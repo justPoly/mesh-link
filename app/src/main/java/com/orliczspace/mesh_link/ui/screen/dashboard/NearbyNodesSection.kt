@@ -1,3 +1,4 @@
+
 package com.orliczspace.mesh_link.ui.screen.dashboard
 
 import androidx.compose.foundation.background
@@ -18,6 +19,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -26,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import com.orliczspace.mesh_link.network.LinkProbeService
 import com.orliczspace.mesh_link.network.NeighbourDiscoveryService
 import com.orliczspace.mesh_link.network.RoutingStateRepository
+import kotlinx.coroutines.delay
 
 private data class NearbyNode(
     val id: String,
@@ -40,17 +47,35 @@ fun NearbyNodesSection(
     linkProbeService: LinkProbeService,
     routingRepository: RoutingStateRepository
 ) {
-    val probePeers = linkProbeService.getKnownPeers()
-    val routingPeers = routingRepository.routingTable
-    val discoveredPeers = neighbourService.discoveredPeers
+    // LinkProbeService's peer map is not Compose-observable.
+    // Periodically refresh it so changes appear on both phones.
+    var refreshTick by remember { mutableStateOf(0) }
+
+    LaunchedEffect(
+        neighbourService,
+        linkProbeService,
+        routingRepository
+    ) {
+        while (true) {
+            delay(1_000)
+            refreshTick++
+        }
+    }
+
+    val currentTick = refreshTick
+
+    val probePeers = remember(currentTick, linkProbeService) {
+        linkProbeService.getKnownPeers().toMap()
+    }
+
+    // These are Compose state collections.
+    val routingPeers = routingRepository.routingTable.toMap()
+    val discoveredPeers = neighbourService.discoveredPeers.toList()
 
     val nodes = buildList {
         val addedIds = mutableSetOf<String>()
 
-        /*
-         * LinkProbe peers are the strongest source for a known
-         * mesh node because they have an actual node ID and IP.
-         */
+        // Mesh peers with a node ID and known IP address.
         probePeers.forEach { (nodeId, address) ->
             if (addedIds.add(nodeId)) {
                 add(
@@ -66,18 +91,13 @@ fun NearbyNodesSection(
             }
         }
 
-        /*
-         * Routing nodes may contain nodes that have not yet appeared
-         * in the LinkProbe peer map.
-         *
-         * averageLatencyMs is already Long?, so no conversion is needed.
-         */
+        // Nodes already present in the routing table.
         routingPeers.forEach { (nodeId, state) ->
             if (addedIds.add(nodeId)) {
                 add(
                     NearbyNode(
                         id = nodeId,
-                        address = null,
+                        address = probePeers[nodeId],
                         latency = state.averageLatencyMs
                             .takeIf { it >= 0 }
                             ?.toLong(),
@@ -87,10 +107,8 @@ fun NearbyNodesSection(
             }
         }
 
-        /*
-         * Wi-Fi Direct discovery can find devices before they become
-         * active mesh peers. Keep them visible as discovered devices.
-         */
+        // Wi-Fi Direct devices that have been discovered but
+        // are not yet confirmed as active mesh peers.
         discoveredPeers.forEach { deviceName ->
             if (addedIds.add(deviceName)) {
                 add(
@@ -119,30 +137,59 @@ fun NearbyNodesSection(
                 style = MaterialTheme.typography.titleLarge
             )
 
-            if (nodes.isNotEmpty()) {
-                Text(
-                    text = "${nodes.size} found",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color.LightGray
-                )
-            }
+            Text(
+                text = "${nodes.size} found",
+                style = MaterialTheme.typography.labelLarge,
+                color = Color.LightGray
+            )
         }
 
         if (nodes.isEmpty()) {
-            DashboardEmptyState(
-                title = "No nearby nodes",
-                message = "Start discovery to find nearby mesh devices."
-            )
-        } else {
-            nodes
-                .take(5)
-                .forEach { node ->
-                    NearbyNodeCard(node)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        color = Color(0xFF101D25),
+                        shape = RoundedCornerShape(18.dp)
+                    )
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Devices,
+                        contentDescription = null,
+                        tint = Color.Gray,
+                        modifier = Modifier.size(32.dp)
+                    )
+
+                    Spacer(modifier = Modifier.size(10.dp))
+
+                    Text(
+                        text = "No nearby nodes detected",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White
+                    )
+
+                    Spacer(modifier = Modifier.size(4.dp))
+
+                    Text(
+                        text = "Keep discovery running while Mesh-link searches for peers.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
                 }
+            }
+        } else {
+            nodes.take(5).forEach { node ->
+                NearbyNodeCard(node)
+            }
 
             if (nodes.size > 5) {
                 Text(
-                    text = "View all nodes",
+                    text = "Showing 5 of ${nodes.size} nodes",
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 2.dp),
@@ -155,22 +202,18 @@ fun NearbyNodesSection(
 }
 
 @Composable
-private fun NearbyNodeCard(
-    node: NearbyNode
-) {
-    val statusColor =
-        if (node.isConnected) {
-            Color(0xFF4ADE80)
-        } else {
-            Color(0xFFFFB020)
-        }
+private fun NearbyNodeCard(node: NearbyNode) {
+    val statusColor = if (node.isConnected) {
+        Color(0xFF4ADE80)
+    } else {
+        Color(0xFFFFB020)
+    }
 
-    val statusText =
-        if (node.isConnected) {
-            "Connected"
-        } else {
-            "Discovered"
-        }
+    val statusText = if (node.isConnected) {
+        "Mesh peer detected"
+    } else {
+        "Wi-Fi Direct discovered"
+    }
 
     Box(
         modifier = Modifier
@@ -203,9 +246,7 @@ private fun NearbyNodeCard(
 
             Spacer(modifier = Modifier.size(12.dp))
 
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = node.id,
                     style = MaterialTheme.typography.titleMedium,
@@ -214,24 +255,19 @@ private fun NearbyNodeCard(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                if (node.address != null) {
+                node.address?.let { address ->
                     Text(
-                        text = node.address,
+                        text = address,
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.LightGray
                     )
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
                             .size(7.dp)
-                            .background(
-                                color = statusColor,
-                                shape = CircleShape
-                            )
+                            .background(statusColor, CircleShape)
                     )
 
                     Spacer(modifier = Modifier.size(6.dp))
@@ -244,65 +280,22 @@ private fun NearbyNodeCard(
                 }
             }
 
-            if (node.latency != null) {
-                Column(
-                    horizontalAlignment = Alignment.End
-                ) {
+            node.latency?.let { latency ->
+                Column(horizontalAlignment = Alignment.End) {
                     Icon(
                         imageVector = Icons.Default.SignalCellularAlt,
-                        contentDescription = null,
+                        contentDescription = "Probe signal",
                         tint = Color(0xFF60A5FA),
                         modifier = Modifier.size(18.dp)
                     )
 
                     Text(
-                        text = "${node.latency} ms",
+                        text = "$latency ms",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.LightGray
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun EmptyNearbyNodesCard() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                color = Color(0xFF101D25),
-                shape = RoundedCornerShape(18.dp)
-            )
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Icon(
-                imageVector = Icons.Default.Devices,
-                contentDescription = null,
-                tint = Color.Gray,
-                modifier = Modifier.size(32.dp)
-            )
-
-            Spacer(modifier = Modifier.size(10.dp))
-
-            Text(
-                text = "No nearby nodes detected",
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White
-            )
-
-            Spacer(modifier = Modifier.size(4.dp))
-
-            Text(
-                text = "Start discovery to find nearby mesh devices.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray
-            )
         }
     }
 }

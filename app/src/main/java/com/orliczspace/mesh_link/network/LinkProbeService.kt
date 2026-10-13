@@ -157,6 +157,18 @@ class LinkProbeService(
         }
     }
 
+
+    fun requestDiscovery() {
+        if (!running || socket?.isClosed != false) {
+            Log.w(TAG, "Cannot request discovery: service is not running")
+            return
+        }
+
+        Log.d(TAG, "Manual discovery requested")
+        broadcastDiscoveryProbe()
+    }
+
+
     private fun broadcastDiscoveryProbe() {
         val activeSocket = socket ?: return
 

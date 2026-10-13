@@ -232,14 +232,6 @@ fun DashboardScreen(
                 navController.navigate(
                     Routes.Routing.route
                 )
-            },
-
-            // Card 12: Statistics screen.
-            // Reuses the existing Performance destination.
-            onStatisticsClick = {
-                navController.navigate(
-                    Routes.Performance.route
-                )
             }
         )
     }
@@ -264,8 +256,7 @@ private fun DashboardContent(
     onDiscoverClick: () -> Unit,
     onNodesClick: () -> Unit,
     onTopologyClick: () -> Unit,
-    onRoutesClick: () -> Unit,
-    onStatisticsClick: () -> Unit
+    onRoutesClick: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -397,6 +388,8 @@ private fun DashboardContent(
         // Card 12: Functional dashboard actions.
         item {
             QuickActionsSection(
+                onDiscoverClick = onDiscoverClick,
+                onNodesClick = onNodesClick,
                 onTopologyClick = onTopologyClick,
                 onRoutesClick = onRoutesClick
             )
