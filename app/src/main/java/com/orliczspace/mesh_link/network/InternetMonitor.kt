@@ -6,7 +6,6 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.util.Log
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.CoroutineScope
@@ -14,159 +13,206 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/**
- * Monitors internet connectivity in real-time.
- * Provides Compose-observable State objects that update instantly
- * when the network changes, even while the app is running.
- */
 class InternetMonitor(context: Context) {
 
-    private val connectivityManager =
-        context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-
-    private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-
-    // Optional fallback polling job for extra reliability on some devices
-    private var pollingJob: kotlinx.coroutines.Job? = null
-
-    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            Log.d("InternetMonitor", "onAvailable: Internet became available")
-            updateNetworkStatus(network)
-        }
-
-        override fun onLost(network: Network) {
-            Log.d("InternetMonitor", "onLost: Internet connection lost")
-            updateCurrentStatus()
-        }
-
-        override fun onCapabilitiesChanged(
-            network: Network,
-            capabilities: NetworkCapabilities
-        ) {
-            Log.d("InternetMonitor", "onCapabilitiesChanged: Capabilities changed")
-            updateNetworkStatus(network, capabilities)
-        }
+    companion object {
+        private const val TAG = "InternetMonitor"
+        private const val POLLING_INTERVAL_MS = 10_000L
     }
 
-    // Private mutable backing states
-    private val _isConnected: MutableState<Boolean> = mutableStateOf(false)
-    private val _connectionType: MutableState<String> = mutableStateOf("Unknown")
+    private val connectivityManager =
+        context.applicationContext.getSystemService(
+            Context.CONNECTIVITY_SERVICE
+        ) as ConnectivityManager
 
-    // Public read-only State objects for safe observation in Compose
+    private val mainScope =
+        CoroutineScope(
+            Dispatchers.Main + SupervisorJob()
+        )
+
+    private var pollingJob: kotlinx.coroutines.Job? = null
+
+    private var callbackRegistered = false
+
+    private val _isConnected = mutableStateOf(false)
+
+    private val _connectionType =
+        mutableStateOf("None")
+
     val isConnected: State<Boolean> = _isConnected
+
     val connectionType: State<String> = _connectionType
+
+    @Volatile
+    private var directInternetAvailable = false
+
+    private val networkCallback =
+        object : ConnectivityManager.NetworkCallback() {
+
+            override fun onAvailable(network: Network) {
+                updateCurrentStatus()
+            }
+
+            override fun onLost(network: Network) {
+                updateCurrentStatus()
+            }
+
+            override fun onCapabilitiesChanged(
+                network: Network,
+                capabilities: NetworkCapabilities
+            ) {
+                updateCurrentStatus()
+            }
+        }
 
     init {
         try {
             val request = NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addCapability(
+                    NetworkCapabilities.NET_CAPABILITY_INTERNET
+                )
+                .addCapability(
+                    NetworkCapabilities.NET_CAPABILITY_NOT_VPN
+                )
                 .build()
 
-            connectivityManager.registerNetworkCallback(request, networkCallback)
-            Log.d("InternetMonitor", "Network callback registered")
-        } catch (e: SecurityException) {
-            Log.e("InternetMonitor", "Permission denied: ${e.message}")
+            connectivityManager.registerNetworkCallback(
+                request,
+                networkCallback
+            )
+
+            callbackRegistered = true
+
+            Log.d(TAG, "Network callback registered")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Network callback registration failed", e)
         }
 
-        // Initial status check
         updateCurrentStatus()
 
-        // Fallback polling every 10 seconds (very lightweight, ensures 100% reliability)
         pollingJob = mainScope.launch {
-            while (true) {
-                delay(10_000L) // 10 seconds
-                Log.d("InternetMonitor", "Fallback poll checking current status")
+            while (isActive) {
+                delay(POLLING_INTERVAL_MS)
                 updateCurrentStatus()
             }
         }
     }
 
-    /**
-     * Checks the current active network (used on init, onLost, and fallback poll)
-     */
-    private fun updateCurrentStatus() {
-        val activeNetwork = connectivityManager.activeNetwork
-        val capabilities = activeNetwork?.let { connectivityManager.getNetworkCapabilities(it) }
+    private fun isValidatedPhysicalNetwork(
+        capabilities: NetworkCapabilities
+    ): Boolean {
 
-        val hasInternet = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-        val type = if (hasInternet) {
-            when {
-                capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "Wi-Fi"
-                capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "Mobile Data"
-                capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> "Ethernet"
-                else -> "Unknown"
-            }
-        } else {
-            "None"
-        }
-
-        mainScope.launch {
-
-            val previousConnected =
-                _isConnected.value
-
-            val previousType =
-                _connectionType.value
-
-            if (
-                previousConnected != hasInternet ||
-                previousType != type
-            ) {
-
-                val detail =
-                    if (hasInternet) {
-                        type
-                    } else {
-                        "None"
-                    }
-
-                NetworkActivityLog.record(
-                    message =
-                        if (hasInternet) {
-                            "Internet connected"
-                        } else {
-                            "Internet disconnected"
-                        },
-                    detail = detail
-                )
-            }
-
-            Log.d(
-                "InternetMonitor",
-                "Status Update → Connected: $hasInternet, Type: $type"
+        val hasInternet =
+            capabilities.hasCapability(
+                NetworkCapabilities.NET_CAPABILITY_INTERNET
             )
 
-            _isConnected.value = hasInternet
-            _connectionType.value = type
+        val isValidated =
+            capabilities.hasCapability(
+                NetworkCapabilities.NET_CAPABILITY_VALIDATED
+            )
+
+        val isVpn =
+            capabilities.hasTransport(
+                NetworkCapabilities.TRANSPORT_VPN
+            )
+
+        val isPhysicalNetwork =
+            capabilities.hasTransport(
+                NetworkCapabilities.TRANSPORT_WIFI
+            ) ||
+                    capabilities.hasTransport(
+                        NetworkCapabilities.TRANSPORT_CELLULAR
+                    ) ||
+                    capabilities.hasTransport(
+                        NetworkCapabilities.TRANSPORT_ETHERNET
+                    )
+
+        return hasInternet &&
+                isValidated &&
+                !isVpn &&
+                isPhysicalNetwork
+    }
+
+    fun getDirectInternetNetwork(): Network? {
+
+        return try {
+
+            val activeNetwork =
+                connectivityManager.activeNetwork
+
+            val activeCapabilities =
+                activeNetwork?.let {
+                    connectivityManager.getNetworkCapabilities(it)
+                }
+
+            if (
+                activeNetwork != null &&
+                activeCapabilities != null &&
+                isValidatedPhysicalNetwork(activeCapabilities)
+            ) {
+                return activeNetwork
+            }
+
+            connectivityManager.allNetworks.firstOrNull { network ->
+
+                val capabilities =
+                    connectivityManager.getNetworkCapabilities(network)
+
+                capabilities != null &&
+                        isValidatedPhysicalNetwork(capabilities)
+            }
+
+        } catch (e: Exception) {
+
+            Log.e(TAG, "Failed to inspect networks", e)
+
+            null
         }
     }
 
-    /**
-     * Called when a network becomes available or capabilities change
-     */
-    private fun updateNetworkStatus(
-        network: Network?,
-        capabilities: NetworkCapabilities? = network?.let {
-            connectivityManager.getNetworkCapabilities(it)
-        }
-    ) {
-        if (capabilities == null) {
-            updateCurrentStatus()
-            return
-        }
+    fun hasDirectInternetAccess(): Boolean {
+        return directInternetAvailable
+    }
 
-        val hasInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-        val type = when {
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Mobile Data"
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
-            else -> "Unknown"
-        }
+    private fun updateCurrentStatus() {
 
         mainScope.launch {
+
+            val internetNetwork =
+                getDirectInternetNetwork()
+
+            val capabilities =
+                internetNetwork?.let {
+                    connectivityManager.getNetworkCapabilities(it)
+                }
+
+            val connected =
+                capabilities != null &&
+                        isValidatedPhysicalNetwork(capabilities)
+
+            val type = when {
+
+                !connected -> "None"
+
+                capabilities?.hasTransport(
+                    NetworkCapabilities.TRANSPORT_WIFI
+                ) == true -> "Wi-Fi"
+
+                capabilities?.hasTransport(
+                    NetworkCapabilities.TRANSPORT_CELLULAR
+                ) == true -> "Mobile Data"
+
+                capabilities?.hasTransport(
+                    NetworkCapabilities.TRANSPORT_ETHERNET
+                ) == true -> "Ethernet"
+
+                else -> "Unknown"
+            }
 
             val previousConnected =
                 _isConnected.value
@@ -174,47 +220,64 @@ class InternetMonitor(context: Context) {
             val previousType =
                 _connectionType.value
 
+            directInternetAvailable = connected
+
+            _isConnected.value = connected
+            _connectionType.value = type
+
             if (
-                previousConnected != hasInternet ||
+                previousConnected != connected ||
                 previousType != type
             ) {
 
                 NetworkActivityLog.record(
-                    message =
-                        if (hasInternet) {
-                            "Internet connected"
-                        } else {
-                            "Internet disconnected"
-                        },
+                    message = if (connected) {
+                        "Internet connected"
+                    } else {
+                        "Internet disconnected"
+                    },
                     detail = type
                 )
             }
 
             Log.d(
-                "InternetMonitor",
-                "Status Update → Connected: $hasInternet, Type: $type"
+                TAG,
+                "Direct Internet: $connected | Type: $type"
             )
-
-            _isConnected.value = hasInternet
-            _connectionType.value = type
         }
     }
 
-    /**
-     * Call this in Activity.onDestroy() to clean up resources and prevent leaks
-     */
     fun close() {
-        try {
-            connectivityManager.unregisterNetworkCallback(networkCallback)
-            Log.d("InternetMonitor", "Network callback unregistered")
-        } catch (e: Exception) {
-            Log.w("InternetMonitor", "Error unregistering callback: ${e.message}")
+
+        if (callbackRegistered) {
+            try {
+
+                connectivityManager.unregisterNetworkCallback(
+                    networkCallback
+                )
+
+            } catch (e: Exception) {
+
+                Log.w(
+                    TAG,
+                    "Failed to unregister callback",
+                    e
+                )
+            }
+
+            callbackRegistered = false
         }
 
         pollingJob?.cancel()
         pollingJob = null
 
+        directInternetAvailable = false
+
+        _isConnected.value = false
+        _connectionType.value = "None"
+
         mainScope.cancel()
-        Log.d("InternetMonitor", "Coroutine scope cancelled")
+
+        Log.d(TAG, "InternetMonitor stopped")
     }
 }

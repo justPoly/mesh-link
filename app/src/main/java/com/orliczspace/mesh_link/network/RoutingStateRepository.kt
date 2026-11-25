@@ -1,4 +1,3 @@
-
 package com.orliczspace.mesh_link.network
 
 import androidx.compose.runtime.getValue
@@ -18,25 +17,12 @@ class RoutingStateRepository(
 
     val routingTable = mutableStateMapOf<String, RoutingState>()
 
-    /*
-     * Observable gateway error for the dashboard.
-     *
-     * An error is shown when a previously elected gateway
-     * is lost and no replacement is available.
-     */
     var gatewayErrorMessage: String? by mutableStateOf(null)
         private set
 
-    /*
-     * Observable route error for the dashboard.
-     */
     var routeErrorMessage: String? by mutableStateOf(null)
         private set
 
-    /*
-     * Tracks whether a route has existed during this
-     * repository's lifetime, preventing startup errors.
-     */
     private var hadRoutePreviously = false
 
     fun updateNode(
@@ -47,7 +33,7 @@ class RoutingStateRepository(
             linkProbeService.getAverageRtt(nodeId) ?: return
 
         val smoothedRtt =
-            smoothedRttLong.toInt()
+            max(smoothedRttLong.toInt(), 0)
 
         val stability =
             linkProbeService.getStability(nodeId)
@@ -81,14 +67,18 @@ class RoutingStateRepository(
                 else -> 20.0
             }
 
-        routingTable[nodeId] = RoutingState(
+        val newState = RoutingState(
             nodeId = nodeId,
-            averageLatencyMs = max(smoothedRtt, 0),
+            averageLatencyMs = smoothedRtt,
             lastLatencyMs = lastRtt,
             degradationCount = degradationCount,
             stabilityScore = stabilityScore,
             hasInternetAccess = hasInternetAccess,
             isGateway = oldState?.isGateway ?: false
+        )
+
+        routingTable[nodeId] = newState.copy(
+            gatewayScore = GatewayScorer.score(newState)
         )
 
         if (oldState == null) {
@@ -99,58 +89,53 @@ class RoutingStateRepository(
         }
 
         if (
-            oldState?.isGateway == true &&
-            degradationCount >= MAX_DEGRADATION_COUNT
+            oldState != null &&
+            oldState.hasInternetAccess != hasInternetAccess
         ) {
+            NetworkActivityLog.record(
+                message = "Internet capability changed",
+                detail = "$nodeId: $hasInternetAccess"
+            )
+        }
+
+        val currentGateway =
+            routingTable.values.firstOrNull {
+                it.isGateway
+            }
+
+        val shouldElectGateway =
+            currentGateway == null ||
+                    !currentGateway.hasInternetAccess ||
+                    oldState == null ||
+                    oldState.hasInternetAccess != hasInternetAccess ||
+                    (
+                            currentGateway.nodeId == nodeId &&
+                                    degradationCount >= MAX_DEGRADATION_COUNT
+                            )
+
+        if (shouldElectGateway) {
             electGateway()
         }
 
-        // Track whether a route has ever been available.
-        if (routingTable.isNotEmpty()) {
-            hadRoutePreviously = true
-        }
-
-        // Clear route errors when a usable Internet gateway exists.
-        val hasUsableInternetRoute =
-            routingTable.values.any {
-                it.isGateway && it.hasInternetAccess
-            }
-
-        if (hasUsableInternetRoute) {
-            routeErrorMessage = null
-        }
+        updateRouteStatus()
     }
 
     fun removeNode(nodeId: String) {
         val removed =
-            routingTable.remove(nodeId)
+            routingTable.remove(nodeId) ?: return
 
-        if (removed != null) {
-            NetworkActivityLog.record(
-                message = "Node removed",
-                detail = nodeId
+        NetworkActivityLog.record(
+            message = "Node removed",
+            detail = nodeId
+        )
+
+        if (removed.isGateway) {
+            electGateway(
+                removedGatewayId = removed.nodeId
             )
-
-            /*
-             * If the removed node was the gateway,
-             * elect a replacement immediately.
-             */
-            if (removed.isGateway) {
-                electGateway(
-                    removedGatewayId = removed.nodeId
-                )
-            }
-
-            // Report route loss if all routing entries disappear.
-            if (
-                hadRoutePreviously &&
-                routingTable.isEmpty()
-            ) {
-                routeErrorMessage =
-                    "The previously available route has been lost. " +
-                            "No routes remain in the routing table."
-            }
         }
+
+        updateRouteStatus()
     }
 
     fun electGateway(
@@ -166,61 +151,87 @@ class RoutingStateRepository(
         val updated =
             routingTable.values.map {
                 it.copy(
-                    gatewayScore = GatewayScorer.score(it),
-                    degradationCount = 0
+                    gatewayScore = GatewayScorer.score(it)
                 )
+            }
+
+        // Only nodes advertising Internet access
+        // are eligible to become a gateway.
+        val eligibleGateways =
+            updated.filter {
+                it.hasInternetAccess
             }
 
         val gateway =
-            updated.maxByOrNull {
-                it.gatewayScore
-            }
+            eligibleGateways
+                .sortedWith(
+                    compareByDescending<RoutingState> {
+                        it.gatewayScore
+                    }.thenBy {
+                        it.nodeId
+                    }
+                )
+                .firstOrNull()
 
-        routingTable.clear()
-
-        updated.forEach {
-            routingTable[it.nodeId] =
-                it.copy(
-                    isGateway = it.nodeId == gateway?.nodeId
+        updated.forEach { state ->
+            routingTable[state.nodeId] =
+                state.copy(
+                    isGateway =
+                        state.nodeId == gateway?.nodeId,
+                    degradationCount = 0
                 )
         }
 
-        val newGateway =
-            gateway?.nodeId
+        val newGateway = gateway?.nodeId
 
-        if (previousGateway != newGateway) {
+        if (newGateway != null) {
 
-            if (newGateway != null) {
-                // A gateway is available again.
-                gatewayErrorMessage = null
+            gatewayErrorMessage = null
 
+            if (previousGateway != newGateway) {
                 NetworkActivityLog.record(
                     message = "Gateway changed",
                     detail = newGateway
                 )
-
-            } else if (previousGateway != null) {
-                // A previous gateway was lost with no replacement.
-                gatewayErrorMessage =
-                    "The previous gateway ($previousGateway) is unavailable, " +
-                            "and no replacement gateway could be selected."
-
-                NetworkActivityLog.record(
-                    message = "Gateway unavailable",
-                    detail = previousGateway
-                )
             }
-        } else if (newGateway != null) {
-            gatewayErrorMessage = null
+
+        } else if (previousGateway != null) {
+
+            gatewayErrorMessage =
+                "The previous gateway ($previousGateway) " +
+                        "is unavailable, and no replacement " +
+                        "gateway could be selected."
+
+            NetworkActivityLog.record(
+                message = "Gateway unavailable",
+                detail = previousGateway
+            )
         }
 
-        // Clear route errors when the selected gateway has Internet access.
-        if (gateway?.hasInternetAccess == true) {
+        updateRouteStatus()
+
+        return newGateway?.let {
+            routingTable[it]
+        }
+    }
+
+    private fun updateRouteStatus() {
+
+        val hasUsableInternetRoute =
+            routingTable.values.any {
+                it.isGateway && it.hasInternetAccess
+            }
+
+        if (hasUsableInternetRoute) {
+
+            hadRoutePreviously = true
             routeErrorMessage = null
-        }
 
-        return gateway?.let {
-            routingTable[it.nodeId]
+        } else if (hadRoutePreviously) {
+
+            routeErrorMessage =
+                "The previously available Internet " +
+                        "route has been lost."
         }
     }
 
@@ -229,14 +240,25 @@ class RoutingStateRepository(
     ): RouteDecision? {
 
         val gateway =
-            routingTable.values
-                .firstOrNull { it.isGateway }
-                ?: return null
+            routingTable.values.firstOrNull {
+                it.isGateway && it.hasInternetAccess
+            } ?: return null
 
         return if (gateway.nodeId == localNodeId) {
-            RouteDecision("INTERNET", null, false)
+
+            RouteDecision(
+                "INTERNET",
+                null,
+                false
+            )
+
         } else {
-            RouteDecision("INTERNET", gateway.nodeId, true)
+
+            RouteDecision(
+                "INTERNET",
+                gateway.nodeId,
+                true
+            )
         }
     }
 }
