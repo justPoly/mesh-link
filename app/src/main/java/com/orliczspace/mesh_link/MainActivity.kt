@@ -549,6 +549,24 @@ class MainActivity : ComponentActivity() {
 
     private fun configureNetworkingCallbacks() {
 
+        neighbourService.onWifiDirectConnected = { info ->
+            if (!isNetworkingShuttingDown) {
+                Log.d(TAG, "WIFI_DIRECT_NETWORK_READY: owner=${info.groupOwnerAddress.hostAddress} | isGroupOwner=${info.isGroupOwner}")
+                if (!info.isGroupOwner) {
+                    linkProbeService.sendProbe(info.groupOwnerAddress, DISCOVERY_PORT)
+                }
+                linkProbeService.requestDiscovery()
+            }
+        }
+
+        neighbourService.onWifiDirectDisconnected = {
+            if (!isNetworkingShuttingDown) {
+                Log.w(TAG, "WIFI_DIRECT_DISCONNECTED: awaiting peer timeout")
+            }
+        }
+
+
+
         // -----------------------------------------------------
         // Peer discovery
         // -----------------------------------------------------
@@ -1006,6 +1024,8 @@ class MainActivity : ComponentActivity() {
 
         if (::neighbourService.isInitialized) {
 
+            neighbourService.onWifiDirectConnected = null
+            neighbourService.onWifiDirectDisconnected = null
             neighbourService.stopDiscovery()
         }
 
