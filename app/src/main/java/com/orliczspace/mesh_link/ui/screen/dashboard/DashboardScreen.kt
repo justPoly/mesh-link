@@ -1,6 +1,9 @@
-
 package com.orliczspace.mesh_link.ui.screen.dashboard
 
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import com.orliczspace.mesh_link.ui.navigation.MESH_DIAGNOSTICS_ROUTE
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -232,6 +235,12 @@ fun DashboardScreen(
                 navController.navigate(
                     Routes.Routing.route
                 )
+            },
+
+            onDiagnosticsClick = {
+                navController.navigate(
+                    MESH_DIAGNOSTICS_ROUTE
+                )
             }
         )
     }
@@ -256,7 +265,8 @@ private fun DashboardContent(
     onDiscoverClick: () -> Unit,
     onNodesClick: () -> Unit,
     onTopologyClick: () -> Unit,
-    onRoutesClick: () -> Unit
+    onRoutesClick: () -> Unit,
+    onDiagnosticsClick: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -385,18 +395,45 @@ private fun DashboardContent(
             )
         }
 
-        // Card 12: Functional dashboard actions.
+
+        // Functional dashboard actions.
+
         item {
+
             QuickActionsSection(
+
                 onDiscoverClick = onDiscoverClick,
+
                 onNodesClick = onNodesClick,
+
                 onTopologyClick = onTopologyClick,
+
                 onRoutesClick = onRoutesClick
             )
         }
 
+        // Mesh diagnostics.
+
         item {
+
+            OutlinedButton(
+
+                onClick = onDiagnosticsClick,
+
+                modifier = Modifier.fillMaxWidth()
+
+            ) {
+
+                Text("Open Mesh Diagnostics")
+            }
+        }
+
+        // Recent network activity.
+
+        item {
+
             RecentActivitySection()
         }
+
     }
 }
